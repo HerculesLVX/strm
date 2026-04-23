@@ -1,0 +1,1963 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>STRM — Live TV, Movies &amp; Series</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+/* STRM — design tokens */
+:root {
+  --ink-0:    oklch(0.12 0.01 250);    /* deepest backdrop */
+  --ink-1:    oklch(0.16 0.012 250);   /* surface base */
+  --ink-2:    oklch(0.22 0.014 250);   /* raised */
+  --ink-3:    oklch(0.28 0.014 250);   /* raised 2 */
+
+  --glass-1:  rgba(255,255,255,0.05);
+  --glass-2:  rgba(255,255,255,0.08);
+  --glass-3:  rgba(255,255,255,0.12);
+  --stroke-1: rgba(255,255,255,0.08);
+  --stroke-2: rgba(255,255,255,0.14);
+  --stroke-3: rgba(255,255,255,0.24);
+
+  --text-1:   rgba(255,255,255,0.98);
+  --text-2:   rgba(255,255,255,0.66);
+  --text-3:   rgba(255,255,255,0.40);
+  --text-4:   rgba(255,255,255,0.22);
+
+  /* Premium mono: accent is near-white. Color only comes from content. */
+  --accent:   #ffffff;
+  --accent-2: rgba(255,255,255,0.82);
+  --live:     #ff3b30;   /* reserved strictly for LIVE dots */
+  --good:     rgba(255,255,255,0.92);
+
+  --focus-ring: rgba(255,255,255,0.98);
+  --focus-glow: 0 0 0 2px rgba(255,255,255,0.98), 0 0 0 6px rgba(255,255,255,0.12), 0 18px 48px rgba(0,0,0,0.7);
+
+  --blur-heavy: blur(40px) saturate(1.5);
+  --blur-med:   blur(24px) saturate(1.35);
+  --blur-light: blur(12px) saturate(1.2);
+
+  --font-display: system-ui, -apple-system, "SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-text:    system-ui, -apple-system, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:    "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-xl: 32px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--ink-0); color: var(--text-1); font-family: var(--font-text); -webkit-font-smoothing: antialiased; }
+
+/* Full-page ambient backdrop — radial bloom behind everything */
+.strm-root {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(255,255,255,0.035), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 100%, rgba(255,255,255,0.025), transparent 60%),
+    var(--ink-0);
+  position: relative;
+  overflow: hidden;
+}
+
+.strm-root::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+/* Glass surface */
+.glass {
+  background: var(--glass-1);
+  backdrop-filter: var(--blur-heavy);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--r-lg);
+}
+.glass-2 { background: var(--glass-2); backdrop-filter: var(--blur-med); -webkit-backdrop-filter: var(--blur-med); border: 1px solid var(--stroke-2); }
+
+/* Focus ring — universal */
+.focusable { outline: none; position: relative; transition: transform .22s var(--ease-out), box-shadow .22s var(--ease-out); }
+.focusable.is-focused, .focusable:focus-visible {
+  box-shadow: var(--focus-glow);
+  transform: translateY(-2px) scale(1.04);
+  z-index: 3;
+}
+
+/* scroll rails hide scrollbar */
+.rail::-webkit-scrollbar { display: none; }
+.rail { scrollbar-width: none; }
+
+/* type utilities */
+.t-display { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.025em; }
+.t-mono    { font-family: var(--font-mono); letter-spacing: 0.04em; }
+.t-eyebrow { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-3); font-weight: 500; }
+
+/* live indicator */
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 12px var(--live);
+  animation: live-pulse 1.6s var(--ease) infinite;
+}
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* STRM stripe placeholder (fallback when no poster) */
+.strm-placeholder {
+  position: relative; overflow: hidden;
+  background: linear-gradient(135deg, var(--ink-2), var(--ink-1));
+}
+.strm-placeholder::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(115deg,
+    rgba(255,255,255,0.03) 0 1px,
+    transparent 1px 14px);
+}
+
+/* gentle card hover (mouse fallback) */
+@media (hover: hover) {
+  .focusable:hover { box-shadow: var(--focus-glow); transform: translateY(-2px) scale(1.03); z-index: 3; }
+}
+html, body, #root { width: 100%; height: 100%; margin: 0; padding: 0; }
+body { overflow-x: hidden; }
+input::placeholder { color: var(--text-3); }
+input { caret-color: var(--text-1); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/* STRM logo — one continuous stroke: an "S" curve that flows into a play triangle.
+   Used as the mark + as an active preloader (endless stroke-dash draw + gentle breathe). */
+
+function StrmMark({ size = 64, color = 'currentColor', animated = false, style = {} }) {
+  // viewBox 64x64. The path starts top-right of the S, sweeps through the S,
+  // exits at the bottom and returns as a filled play triangle on the right.
+  // The stroke path is one continuous 'd'.
+  const uid = React.useId ? React.useId().replace(/:/g, '') : 'strm' + Math.random().toString(36).slice(2, 7);
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" style={{ display: 'block', ...style }}>
+      <defs>
+        <linearGradient id={`g-${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#9ee3ff" />
+        </linearGradient>
+        <filter id={`glow-${uid}`} x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="1.2" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+      {/* Single-path swoosh: S that extrudes into the play triangle */}
+      <path
+        d="
+          M 48 14
+          C 40 8, 22 8, 16 18
+          C 10 28, 22 32, 32 34
+          C 42 36, 54 40, 48 50
+          C 42 60, 24 60, 16 54
+          L 22 50
+          L 50 34
+          L 22 18
+          Z
+        "
+        fill={`url(#g-${uid})`}
+        filter={`url(#glow-${uid})`}
+        style={animated ? { animation: 'strm-breathe 2.8s ease-in-out infinite' } : undefined}
+      />
+      <style>{`
+        @keyframes strm-breathe {
+          0%, 100% { opacity: 0.95; transform: scale(1); transform-origin: 32px 32px; }
+          50% { opacity: 1; transform: scale(1.04); transform-origin: 32px 32px; }
+        }
+      `}</style>
+    </svg>
+  );
+}
+
+/* Wordmark: STRM in tight display type + mark prefix.
+   The StrmMark SVG has internal padding (glyph begins at ~x=16 of 64-viewbox).
+   We compensate with a negative marginLeft so the visible glyph aligns to the
+   wrapper's left edge — otherwise the wordmark sits ~6px right of page gutters. */
+function StrmWordmark({ size = 28, color = 'var(--text-1)', animated = false }) {
+  const markSize = size * 1.1;
+  const glyphInset = markSize * (16 / 64); // see path d= — starts at x=16 of viewbox 64
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: size * 0.25, color, marginLeft: -glyphInset }}>
+      <StrmMark size={markSize} animated={animated} />
+      <span className="t-display" style={{ fontSize: size, fontWeight: 700, letterSpacing: '0.18em', lineHeight: 1 }}>STRM</span>
+    </div>
+  );
+}
+
+/* Preloader: a centered mark with subtle "active" shimmer — used whenever a tile's
+   content is loading, or as a first-run splash. */
+function StrmPreloader({ size = 96, label }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, color: 'var(--text-2)' }}>
+      <div style={{ position: 'relative', width: size, height: size }}>
+        <StrmMark size={size} animated />
+        <div style={{
+          position: 'absolute', inset: -size * 0.25, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(158,227,255,0.22), transparent 60%)',
+          animation: 'strm-halo 2.8s ease-in-out infinite',
+          pointerEvents: 'none',
+        }} />
+      </div>
+      {label && <div className="t-eyebrow" style={{ color: 'var(--text-3)' }}>{label}</div>}
+      <style>{`
+        @keyframes strm-halo { 0%,100% { opacity: .4; transform: scale(1);} 50% { opacity: .9; transform: scale(1.1);} }
+      `}</style>
+    </div>
+  );
+}
+
+Object.assign(window, { StrmMark, StrmWordmark, StrmPreloader });
+</script>
+
+<script type="text/babel">
+/* Typographic placeholder tiles — stand in for real poster art.
+   Each tile has a muted gradient backdrop + STRM micro-mark + a title typeset.
+   The whole prototype uses these; swap with real <img> when a server is plugged in. */
+
+const PLACEHOLDER_HUES = [
+  { from: '#1a2340', to: '#0a1020', tint: '#5ac8fa' },   // cool blue
+  { from: '#3a1a2a', to: '#1a0a14', tint: '#ff6a9a' },   // rose
+  { from: '#2a2040', to: '#0e0820', tint: '#b49aff' },   // violet
+  { from: '#1a3030', to: '#081818', tint: '#5ae0c8' },   // teal
+  { from: '#3a2a10', to: '#180f04', tint: '#ffb86a' },   // amber
+  { from: '#2a1030', to: '#100418', tint: '#d46aff' },   // magenta
+  { from: '#10302a', to: '#041814', tint: '#6affc8' },   // jade
+  { from: '#2a2a2a', to: '#0e0e0e', tint: '#cccccc' },   // neutral
+];
+
+function hueFor(str) {
+  let h = 0; for (let i = 0; i < (str || '').length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return PLACEHOLDER_HUES[h % PLACEHOLDER_HUES.length];
+}
+
+/* Tile shapes: 'landscape' (16:9), 'poster' (2:3), 'square' */
+function Poster({ title, subtitle, meta, cover, shape = 'poster', size = 'md', loading = false, style = {} }) {
+  const dims = {
+    sm: { landscape: [220, 124], poster: [140, 210], square: [160, 160] },
+    md: { landscape: [320, 180], poster: [200, 300], square: [220, 220] },
+    lg: { landscape: [480, 270], poster: [280, 420], square: [300, 300] },
+    hero: { landscape: [1200, 620], poster: [520, 780], square: [620, 620] },
+  }[size][shape];
+  const [w, h] = dims;
+  const hue = hueFor(title || 'x');
+  const [imgOk, setImgOk] = React.useState(!!cover);
+  const showImg = cover && imgOk;
+
+  return (
+    <div style={{
+      width: w, height: h, position: 'relative', overflow: 'hidden',
+      borderRadius: 'var(--r-md)',
+      background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`,
+      boxShadow: '0 6px 24px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.05)',
+      ...style,
+    }}>
+      {/* real artwork if present */}
+      {showImg && (
+        <img
+          src={cover}
+          alt=""
+          loading="lazy"
+          onError={() => setImgOk(false)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      )}
+
+      {/* typographic placeholder (always present under image; visible if image fails) */}
+      {!showImg && (
+        <>
+          <div style={{
+            position: 'absolute', inset: 0,
+            backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 18px)',
+          }} />
+          <div style={{
+            position: 'absolute', top: '-30%', right: '-20%', width: '80%', height: '80%',
+            background: `radial-gradient(circle, ${hue.tint}33, transparent 60%)`,
+            filter: 'blur(20px)',
+          }} />
+          <div style={{ position: 'absolute', top: 12, left: 12, opacity: 0.6 }}>
+            <StrmMark size={shape === 'landscape' ? 18 : 14} />
+          </div>
+        </>
+      )}
+
+      {/* vignette bottom — always, so text reads over art */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: '60%',
+        background: 'linear-gradient(to top, rgba(0,0,0,0.78), transparent)',
+      }} />
+
+      {loading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <StrmPreloader size={shape === 'landscape' ? 56 : 42} />
+        </div>
+      )}
+
+      {/* text */}
+      {!loading && (
+        <div style={{ position: 'absolute', bottom: 14, left: 14, right: 14, color: 'rgba(255,255,255,0.98)' }}>
+          {meta && <div className="t-eyebrow" style={{ marginBottom: 6, color: 'rgba(255,255,255,0.78)' }}>{meta}</div>}
+          <div className="t-display" style={{
+            fontSize: shape === 'landscape' ? (size === 'lg' ? 26 : 18) : (size === 'lg' ? 24 : 16),
+            fontWeight: 700, lineHeight: 1.1, textShadow: '0 2px 10px rgba(0,0,0,0.55)',
+          }}>{title}</div>
+          {subtitle && <div style={{ marginTop: 4, fontSize: 12, color: 'rgba(255,255,255,0.72)', textShadow: '0 1px 6px rgba(0,0,0,0.5)' }}>{subtitle}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Channel logo placeholder: square glass tile with 2-3 letter mark, or real logo */
+function ChannelMark({ name, logo, size = 44 }) {
+  const hue = hueFor(name);
+  const letters = (name || '').replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase() || '—';
+  const [imgOk, setImgOk] = React.useState(!!logo);
+  if (logo && imgOk) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: 10, flexShrink: 0, overflow: 'hidden',
+        background: 'rgba(0,0,0,0.4)',
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12), 0 2px 8px rgba(0,0,0,0.4)',
+        display:'grid', placeItems:'center',
+      }}>
+        <img src={logo} alt="" onError={() => setImgOk(false)} style={{ width:'82%', height:'82%', objectFit:'contain' }}/>
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 10,
+      display: 'grid', placeItems: 'center', flexShrink: 0,
+      background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`,
+      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08), 0 2px 8px rgba(0,0,0,0.4)',
+      color: 'rgba(255,255,255,0.92)', fontFamily: 'var(--font-display)', fontWeight: 800,
+      fontSize: size * 0.32, letterSpacing: '0.04em',
+    }}>{letters}</div>
+  );
+}
+
+Object.assign(window, { Poster, ChannelMark, hueFor });
+</script>
+
+<script type="text/babel">
+/* Content catalog — shape only; real content fills in when server is connected. */
+
+const LIVE_CHANNELS = [
+  { id: 'sky1',   name: 'Sky One UK',     cat: 'Entertainment', now: 'Top Gear',           next: 'Brooklyn 99',       progress: 0.62, viewers: 12400 },
+  { id: 'bbc1',   name: 'BBC One',        cat: 'Entertainment', now: 'The One Show',       next: 'EastEnders',        progress: 0.18, viewers: 46200 },
+  { id: 'itv1',   name: 'ITV 1',          cat: 'Entertainment', now: 'Coronation Street',  next: 'Emmerdale',         progress: 0.45, viewers: 31000 },
+  { id: 'ch4',    name: 'Channel 4',      cat: 'Entertainment', now: 'The Great Bake Off', next: 'Taskmaster',        progress: 0.8,  viewers: 18400 },
+  { id: 'sksp',   name: 'Sky Sports PL',  cat: 'Sport',         now: 'Arsenal vs Spurs',   next: 'MNF',               progress: 0.33, viewers: 89100, live: 'LIVE' },
+  { id: 'sksf1',  name: 'Sky Sports F1',  cat: 'Sport',         now: 'Miami GP Qualifying',next: 'Paddock Live',      progress: 0.71, viewers: 42300, live: 'LIVE' },
+  { id: 'tnts',   name: 'TNT Sports 1',   cat: 'Sport',         now: 'UCL: Madrid v Inter',next: 'Post-Match',        progress: 0.12, viewers: 71200, live: 'LIVE' },
+  { id: 'skcin',  name: 'Sky Cinema',     cat: 'Movies',        now: 'Dune: Part Two',     next: 'Oppenheimer',       progress: 0.54, viewers: 22100 },
+  { id: 'film4',  name: 'Film4',          cat: 'Movies',        now: 'Parasite',           next: 'The Banshees',      progress: 0.28, viewers: 9400 },
+  { id: 'bbcnws', name: 'BBC News',       cat: 'News',          now: 'News at Ten',        next: 'Question Time',     progress: 0.2,  viewers: 54000 },
+  { id: 'skynws', name: 'Sky News',       cat: 'News',          now: 'The Late Debate',    next: 'Press Preview',     progress: 0.66, viewers: 18200 },
+  { id: 'disc',   name: 'Discovery',      cat: 'Documentary',   now: 'Gold Rush',          next: 'Deadliest Catch',   progress: 0.41, viewers: 7400 },
+  { id: 'nat',    name: 'Nat Geo',        cat: 'Documentary',   now: 'Life Below Zero',    next: 'Wicked Tuna',       progress: 0.58, viewers: 6200 },
+  { id: 'cbb',    name: 'CBeebies',       cat: 'Kids',          now: 'Peppa Pig',          next: 'Bluey',             progress: 0.15, viewers: 14000 },
+  { id: 'cmdy',   name: 'Comedy Central', cat: 'Entertainment', now: 'Friends',            next: 'South Park',        progress: 0.44, viewers: 11200 },
+  { id: 'mtv',    name: 'MTV',            cat: 'Music',         now: 'Top 20 UK',          next: 'Ridiculousness',    progress: 0.5,  viewers: 2100 },
+  { id: 'daveuk', name: 'Dave',           cat: 'Entertainment', now: 'Taskmaster',         next: 'Would I Lie',       progress: 0.7,  viewers: 8400 },
+  { id: 'gold',   name: 'Gold',           cat: 'Entertainment', now: 'Only Fools',         next: 'Blackadder',        progress: 0.22, viewers: 5600 },
+];
+
+const MOVIES = [
+  { id:'m1',  title:'Northern Tide',       year:2025, rating:'15', runtime:'2h 08m', genre:'Thriller',     hot:true },
+  { id:'m2',  title:'The Lantern Keepers', year:2024, rating:'12', runtime:'1h 54m', genre:'Drama' },
+  { id:'m3',  title:'Grain Coast',         year:2024, rating:'18', runtime:'2h 21m', genre:'Crime' },
+  { id:'m4',  title:'Paper Crowns',        year:2023, rating:'PG', runtime:'1h 42m', genre:'Family' },
+  { id:'m5',  title:'Signal Loss',         year:2025, rating:'15', runtime:'1h 58m', genre:'Sci-Fi',       hot:true },
+  { id:'m6',  title:'Harbour Lights',      year:2022, rating:'12', runtime:'2h 04m', genre:'Romance' },
+  { id:'m7',  title:'A Quiet County',      year:2025, rating:'15', runtime:'1h 48m', genre:'Mystery' },
+  { id:'m8',  title:'Last Orders',         year:2023, rating:'18', runtime:'2h 16m', genre:'Drama' },
+  { id:'m9',  title:'The Sixth Lap',       year:2024, rating:'PG', runtime:'1h 36m', genre:'Sport' },
+  { id:'m10', title:'Chalkline',           year:2025, rating:'15', runtime:'2h 12m', genre:'Thriller' },
+];
+
+const SERIES = [
+  { id:'s1', title:'The Estuary',      seasons:3, lastEp:'S3 · E04', genre:'Crime Drama',  meta:'New episode' },
+  { id:'s2', title:'Midnight Ward',    seasons:2, lastEp:'S2 · E09', genre:'Medical' },
+  { id:'s3', title:'Glassworks',       seasons:4, lastEp:'S4 · E02', genre:'Sci-Fi',       meta:'Trending' },
+  { id:'s4', title:'Crown & Anchor',   seasons:1, lastEp:'S1 · E06', genre:'Comedy' },
+  { id:'s5', title:'The Long Break',   seasons:2, lastEp:'S2 · E01', genre:'Drama',        meta:'New season' },
+  { id:'s6', title:'Counterweight',    seasons:5, lastEp:'S5 · E08', genre:'Thriller' },
+  { id:'s7', title:'Slate & Cloud',    seasons:1, lastEp:'S1 · E03', genre:'Nature Doc' },
+  { id:'s8', title:'Portside',         seasons:3, lastEp:'S3 · E11', genre:'Soap' },
+];
+
+const CONTINUE_WATCHING = [
+  { id:'c1', title:'The Estuary',   sub:'S3 · E04 · 23 min left',     progress: 0.78, kind:'series', genre:'Crime Drama' },
+  { id:'c2', title:'Signal Loss',   sub:'47 min in · 1h 11m left',     progress: 0.35, kind:'movie',  genre:'Sci-Fi' },
+  { id:'c3', title:'Glassworks',    sub:'S4 · E02 · 9 min left',       progress: 0.92, kind:'series', genre:'Sci-Fi' },
+  { id:'c4', title:'Crown & Anchor',sub:'S1 · E06 · 14 min left',      progress: 0.65, kind:'series', genre:'Comedy' },
+  { id:'c5', title:'Northern Tide', sub:'Started · 2h 02m left',       progress: 0.08, kind:'movie',  genre:'Thriller' },
+];
+
+Object.assign(window, { LIVE_CHANNELS, MOVIES, SERIES, CONTINUE_WATCHING });
+</script>
+
+<script type="text/babel">
+/* Xtream Codes client for STRM.
+ *
+ * Endpoints (standard Xtream panel):
+ *   {dns}/player_api.php?username=U&password=P&action=get_live_categories
+ *   {dns}/player_api.php?username=U&password=P&action=get_live_streams[&category_id=N]
+ *   {dns}/player_api.php?username=U&password=P&action=get_vod_categories
+ *   {dns}/player_api.php?username=U&password=P&action=get_vod_streams[&category_id=N]
+ *   {dns}/player_api.php?username=U&password=P&action=get_series_categories
+ *   {dns}/player_api.php?username=U&password=P&action=get_series[&category_id=N]
+ *   {dns}/player_api.php?username=U&password=P&action=get_short_epg&stream_id=S
+ *
+ * Stream URLs:
+ *   Live:   {dns}/live/{user}/{pass}/{stream_id}.m3u8   (HLS — browser-playable via hls.js)
+ *           {dns}/{user}/{pass}/{stream_id}             (MPEG-TS — APK / ExoPlayer)
+ *   VOD:    {dns}/movie/{user}/{pass}/{stream_id}.{container}
+ *   Series: {dns}/series/{user}/{pass}/{episode_id}.{container}
+ *
+ * CORS WARNING: most Xtream servers do NOT send Access-Control-Allow-Origin,
+ * so browser fetches will fail. We return { ok:false, reason:'cors' } on
+ * network errors so the UI can gracefully fall back to the placeholder catalog.
+ * The native APK / WebView with relaxed CORS will work end-to-end.
+ */
+
+const STRM_CREDS = /*EDITMODE-BEGIN-CREDS*/{
+  "dns":      "http://riqzeijs.enedns.com",
+  "username": "ANH4FFCM",
+  "password": "CNHUEX89",
+  "method":   "xtream",
+  "region":   "EU | UK"
+}/*EDITMODE-END-CREDS*/;
+
+function xtUrl(action, extra = {}) {
+  const { dns, username, password } = STRM_CREDS;
+  const qs = new URLSearchParams({ username, password, action, ...extra });
+  return `${dns}/player_api.php?${qs.toString()}`;
+}
+
+async function xtFetch(action, extra) {
+  try {
+    const r = await fetch(xtUrl(action, extra), { mode: 'cors', credentials: 'omit' });
+    if (!r.ok) return { ok: false, reason: `http_${r.status}` };
+    const data = await r.json();
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, reason: 'cors', error: String(e && e.message || e) };
+  }
+}
+
+/* Keep only "EU | UK*" categories for this prototype. Panels commonly prefix
+ * with "EU |", "UK |", "UK:", "UK -" — match generously. */
+function isEuUkCategory(name) {
+  if (!name) return false;
+  const n = name.toUpperCase().trim();
+  return n.startsWith('UK')
+      || n.startsWith('EU |')
+      || n.startsWith('EU:')
+      || n.startsWith('EU -')
+      || n.includes('UK |')
+      || n.includes('| UK')
+      || n.includes('UNITED KINGDOM')
+      || n.includes('ENGLAND');
+}
+
+function liveStreamUrl(streamId, ext = 'm3u8') {
+  const { dns, username, password } = STRM_CREDS;
+  return `${dns}/live/${username}/${password}/${streamId}.${ext}`;
+}
+function vodStreamUrl(streamId, container = 'mp4') {
+  const { dns, username, password } = STRM_CREDS;
+  return `${dns}/movie/${username}/${password}/${streamId}.${container}`;
+}
+function seriesStreamUrl(episodeId, container = 'mp4') {
+  const { dns, username, password } = STRM_CREDS;
+  return `${dns}/series/${username}/${password}/${episodeId}.${container}`;
+}
+
+/* Bootstrap: load categories + top streams in parallel, filter to EU|UK.
+ * Returns { ok, live:{categories,channels}, vod:{...}, series:{...}, reason? } */
+async function loadCatalog() {
+  const [liveCats, vodCats, seriesCats, liveStreams, vodStreams, series] = await Promise.all([
+    xtFetch('get_live_categories'),
+    xtFetch('get_vod_categories'),
+    xtFetch('get_series_categories'),
+    xtFetch('get_live_streams'),
+    xtFetch('get_vod_streams'),
+    xtFetch('get_series'),
+  ]);
+
+  if (!liveCats.ok) return { ok: false, reason: liveCats.reason };
+
+  const keepIds = (cats) => new Set(
+    (cats.data || []).filter(c => isEuUkCategory(c.category_name)).map(c => String(c.category_id))
+  );
+  const liveKeep   = keepIds(liveCats);
+  const vodKeep    = vodCats.ok    ? keepIds(vodCats)    : new Set();
+  const seriesKeep = seriesCats.ok ? keepIds(seriesCats) : new Set();
+
+  const filt = (arr, keep) => (arr || []).filter(s => keep.has(String(s.category_id)));
+
+  return {
+    ok: true,
+    live: {
+      categories: (liveCats.data || []).filter(c => isEuUkCategory(c.category_name)),
+      channels: filt(liveStreams.data, liveKeep),
+    },
+    vod: {
+      categories: vodCats.ok    ? (vodCats.data    || []).filter(c => isEuUkCategory(c.category_name)) : [],
+      movies:     filt(vodStreams.data, vodKeep),
+    },
+    series: {
+      categories: seriesCats.ok ? (seriesCats.data || []).filter(c => isEuUkCategory(c.category_name)) : [],
+      shows:      filt(series.data, seriesKeep),
+    },
+  };
+}
+
+/* React hook: exposes { status, catalog, error }. status ∈ 'idle'|'loading'|'ok'|'offline' */
+function useCatalog(enabled) {
+  const [state, setState] = React.useState({ status: enabled ? 'loading' : 'idle', catalog: null, error: null });
+  React.useEffect(() => {
+    if (!enabled) return;
+    let cancel = false;
+    (async () => {
+      const r = await loadCatalog();
+      if (cancel) return;
+      if (r.ok) setState({ status: 'ok', catalog: r, error: null });
+      else setState({ status: 'offline', catalog: null, error: r.reason });
+    })();
+    return () => { cancel = true; };
+  }, [enabled]);
+  return state;
+}
+
+Object.assign(window, {
+  STRM_CREDS, xtUrl, xtFetch, loadCatalog, useCatalog,
+  liveStreamUrl, vodStreamUrl, seriesStreamUrl, isEuUkCategory,
+});
+</script>
+
+<script type="text/babel">
+/* STRM Player — in-browser HLS playback for the prototype.
+ *
+ * Browser build: uses hls.js for m3u8 HLS (most Xtream servers emit HLS on
+ *   {dns}/live/{user}/{pass}/{stream_id}.m3u8). Safari has native HLS.
+ * APK note: Android wrapper should REPLACE this component's internals with
+ *   androidx.media3 ExoPlayer (via ReactAndroid bridge or SurfaceView), which
+ *   handles MPEG-TS directly — no need for the .m3u8 wrapper. The UI chrome
+ *   below (controls, meta overlay) is 1:1 portable to the Compose-for-TV
+ *   PlayerControls composable.
+ *
+ * Source selection:
+ *   Live:    liveStreamUrl(stream_id, 'm3u8')  <-- browser
+ *            liveStreamUrl(stream_id, 'ts')    <-- ExoPlayer
+ *   Movie:   vodStreamUrl(stream_id, container_extension||'mp4')
+ *   Series:  seriesStreamUrl(episode_id, container)
+ */
+
+let _hlsLoader = null;
+function loadHls() {
+  if (typeof Hls !== 'undefined') return Promise.resolve(window.Hls);
+  if (_hlsLoader) return _hlsLoader;
+  _hlsLoader = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js';
+    s.onload = () => resolve(window.Hls);
+    s.onerror = () => reject(new Error('hls-load-failed'));
+    document.head.appendChild(s);
+  });
+  return _hlsLoader;
+}
+
+function resolveStreamUrl(item) {
+  if (!item) return null;
+  if (item.stream_type === 'live' && item.stream_id) {
+    return liveStreamUrl(item.stream_id, 'm3u8');
+  }
+  if (item.stream_type === 'movie' && item.stream_id) {
+    return vodStreamUrl(item.stream_id, item.container_extension || 'mp4');
+  }
+  // Series needs an episode id; not wired in prototype — return null to show preloader.
+  return null;
+}
+
+function Player({ item, autoPlay = true, muted = false, onClose, fill = false }) {
+  const videoRef = React.useRef(null);
+  const [state, setState] = React.useState({ status: 'idle', error: null });
+  const url = React.useMemo(() => resolveStreamUrl(item), [item]);
+  const isLive = item && item.stream_type === 'live';
+
+  React.useEffect(() => {
+    if (!url || !videoRef.current) return;
+    const video = videoRef.current;
+    let hls = null;
+    let cancelled = false;
+    setState({ status: 'loading', error: null });
+
+    const isHls = url.endsWith('.m3u8');
+    const canNativeHls = video.canPlayType('application/vnd.apple.mpegurl');
+
+    const start = async () => {
+      try {
+        if (isHls && !canNativeHls) {
+          const Hls = await loadHls();
+          if (cancelled) return;
+          if (!Hls || !Hls.isSupported()) throw new Error('hls-unsupported');
+          hls = new Hls({ lowLatencyMode: true, enableWorker: true });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (autoPlay) video.play().catch(() => {});
+            setState({ status: 'playing', error: null });
+          });
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (data.fatal) setState({ status: 'error', error: data.details || 'hls-fatal' });
+          });
+        } else {
+          video.src = url;
+          if (autoPlay) video.play().catch(() => {});
+          setState({ status: 'playing', error: null });
+        }
+      } catch (e) {
+        setState({ status: 'error', error: String(e && e.message || e) });
+      }
+    };
+    start();
+
+    return () => {
+      cancelled = true;
+      if (hls) { try { hls.destroy(); } catch {} }
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch {}
+    };
+  }, [url]);
+
+  return (
+    <div style={{
+      position: fill ? 'absolute' : 'relative', inset: fill ? 0 : undefined,
+      width: fill ? '100%' : '100%', height: fill ? '100%' : '100%',
+      background: '#000', overflow: 'hidden', borderRadius: fill ? 0 : 22,
+    }}>
+      <video
+        ref={videoRef}
+        muted={muted}
+        playsInline
+        controls={false}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+      />
+
+      {/* Loading / error overlay */}
+      {state.status !== 'playing' && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
+          background: 'radial-gradient(circle at 50% 50%, rgba(20,20,24,0.85), rgba(0,0,0,0.95))',
+        }}>
+          {state.status === 'error' ? (
+            <div style={{ textAlign: 'center', maxWidth: 520, padding: 24 }}>
+              <div className="t-eyebrow" style={{ color: 'var(--text-3)', marginBottom: 10 }}>PLAYBACK UNAVAILABLE</div>
+              <div className="t-display" style={{ fontSize: 22, fontWeight: 600, marginBottom: 10 }}>Can't reach this stream from the browser</div>
+              <div style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                This is expected — Xtream servers don't send CORS headers.
+                The APK build uses ExoPlayer natively and will play this stream directly.
+                <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-3)', wordBreak: 'break-all' }}>{url}</div>
+              </div>
+            </div>
+          ) : !url ? (
+            <div style={{ textAlign:'center' }}>
+              <StrmPreloader size={96} label="Preparing stream…" />
+            </div>
+          ) : (
+            <StrmPreloader size={120} label={isLive ? 'Tuning in…' : 'Buffering…'} />
+          )}
+        </div>
+      )}
+
+      {/* Top chrome: title + close */}
+      {onClose && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, padding: '20px 24px',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)',
+          display: 'flex', alignItems: 'center', gap: 14, zIndex: 2,
+        }}>
+          <StrmMark size={24}/>
+          <div className="t-display" style={{ fontSize: 18, fontWeight: 600 }}>{item?.title || item?.name || 'Playback'}</div>
+          {isLive && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em' }}>
+              <span className="live-dot"/>LIVE
+            </div>
+          )}
+          <div style={{ flex: 1 }}/>
+          <button onClick={onClose} className="focusable" style={{
+            width: 40, height: 40, borderRadius: 20, border: 'none', cursor: 'pointer',
+            background: 'rgba(0,0,0,0.5)', color: 'var(--text-1)',
+            display: 'grid', placeItems: 'center', fontSize: 20,
+            boxShadow: 'inset 0 0 0 1px var(--stroke-2)',
+          }}>×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { Player, resolveStreamUrl, loadHls });
+</script>
+
+<script type="text/babel">
+/* Onboarding — 4 steps:
+   1. Welcome (STRM preloader + get started)
+   2. Connect method (Xtream vs M3U toggle) + QR pair code
+   3. Connecting (loading)
+   4. Success → enter app
+*/
+
+function Onboarding({ onDone }) {
+  const [step, setStep] = React.useState(0);
+  const [method, setMethod] = React.useState('xtream'); // 'xtream' | 'm3u'
+  const [pairCode] = React.useState(() => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = ''; for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s.slice(0,3) + '-' + s.slice(3);
+  });
+  const [autoProgress, setAutoProgress] = React.useState(false);
+
+  // When on step 2 (pair), simulate that the phone side pushed creds after 4s
+  React.useEffect(() => {
+    if (step === 1 && autoProgress) {
+      const t = setTimeout(() => setStep(2), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [step, autoProgress]);
+
+  React.useEffect(() => {
+    if (step === 2) {
+      const t = setTimeout(() => setStep(3), 2400);
+      return () => clearTimeout(t);
+    }
+    if (step === 3) {
+      const t = setTimeout(() => onDone && onDone(), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [step, onDone]);
+
+  return (
+    <div className="strm-root" style={{ minHeight: '100%', height: '100%', display: 'grid', placeItems: 'center', padding: 60 }}>
+      <div style={{ width: '100%', maxWidth: 1100, display: 'grid', gap: 48, justifyItems: 'center' }}>
+        {step === 0 && <OnbWelcome onNext={() => { setStep(1); setAutoProgress(true); }} />}
+        {step === 1 && <OnbPair method={method} setMethod={setMethod} pairCode={pairCode} onManual={() => setStep(2)} />}
+        {step === 2 && <OnbConnecting />}
+        {step === 3 && <OnbSuccess />}
+      </div>
+      {/* Step dots */}
+      <div style={{ position: 'absolute', bottom: 36, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 10 }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{
+            width: i === step ? 24 : 6, height: 6, borderRadius: 3,
+            background: i <= step ? 'var(--text-1)' : 'var(--text-4)',
+            transition: 'all .3s var(--ease)',
+          }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OnbWelcome({ onNext }) {
+  return (
+    <div style={{ textAlign: 'center', display: 'grid', gap: 32, justifyItems: 'center' }}>
+      <StrmPreloader size={120} />
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div className="t-display" style={{ fontSize: 88, lineHeight: 0.95, fontWeight: 700, letterSpacing: '-0.04em' }}>
+          Live TV, Movies<br/>and Series.
+        </div>
+        <div style={{ fontSize: 28, color: 'var(--text-2)', fontWeight: 400, textWrap: 'pretty', maxWidth: 760, margin: '0 auto' }}>
+          High-definition, cinematic, intuitive. Connect your server and STRM gets out of the way.
+        </div>
+      </div>
+      <FocusButton primary onClick={onNext} autoFocus>
+        Get started
+        <span style={{ marginLeft: 12, opacity: 0.65 }}>→</span>
+      </FocusButton>
+    </div>
+  );
+}
+
+function OnbPair({ method, setMethod, pairCode, onManual }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 80, alignItems: 'center', width: '100%' }}>
+      {/* Left: copy + method toggle */}
+      <div style={{ display: 'grid', gap: 32 }}>
+        <div className="t-eyebrow">Step 2 of 4 · Connect your server</div>
+        <div className="t-display" style={{ fontSize: 68, lineHeight: 1, fontWeight: 700, letterSpacing: '-0.035em' }}>
+          No typing.<br/>
+          <span style={{ color: 'var(--text-2)' }}>Just scan.</span>
+        </div>
+        <div style={{ fontSize: 22, color: 'var(--text-2)', lineHeight: 1.45, maxWidth: 520 }}>
+          Open <span className="t-mono" style={{ color: 'var(--accent)' }}>strm.app/pair</span> on your phone, enter the code shown, and your credentials push to this device.
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, padding: 4, background: 'var(--glass-1)', border: '1px solid var(--stroke-1)', borderRadius: 14, width: 'fit-content' }}>
+          {[
+            { id: 'xtream', label: 'Xtream Codes' },
+            { id: 'm3u',    label: 'M3U URL' },
+          ].map(m => (
+            <button key={m.id} onClick={() => setMethod(m.id)} className="focusable t-display" style={{
+              padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: method === m.id ? 'var(--glass-3)' : 'transparent',
+              color: method === m.id ? 'var(--text-1)' : 'var(--text-2)',
+              fontWeight: 500, fontSize: 16, letterSpacing: '-0.01em',
+              boxShadow: method === m.id ? 'inset 0 0 0 1px var(--stroke-2)' : 'none',
+            }}>{m.label}</button>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gap: 10, color: 'var(--text-3)', fontSize: 15 }}>
+          {method === 'xtream' ? (
+            <>
+              <FieldPreview label="Server URL"   value="http://••••••••••.com:8080" />
+              <FieldPreview label="Username"     value="••••••••••" />
+              <FieldPreview label="Password"     value="••••••••••" />
+            </>
+          ) : (
+            <FieldPreview label="M3U Playlist URL" value="http://••••••••••.com/get.php?..." />
+          )}
+          <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
+            Fields fill automatically when you confirm on your phone.
+          </div>
+        </div>
+
+        <button onClick={onManual} className="focusable" style={{
+          background: 'transparent', border: 'none', color: 'var(--text-2)', textAlign: 'left',
+          fontFamily: 'var(--font-text)', fontSize: 15, padding: '8px 0', cursor: 'pointer', width: 'fit-content',
+        }}>Enter details manually instead →</button>
+      </div>
+
+      {/* Right: pair code card */}
+      <div className="glass" style={{ padding: 44, display: 'grid', gap: 28, justifyItems: 'center', textAlign: 'center' }}>
+        <div className="t-eyebrow">Pair on phone</div>
+
+        {/* QR placeholder — styled dotted grid inspired by Apple device pairing UI, original design */}
+        <div style={{ background: 'rgba(255,255,255,0.96)', padding: 24, borderRadius: 22, boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+          <QRArt seed={pairCode} size={220} />
+        </div>
+
+        <div>
+          <div style={{ color: 'var(--text-3)', fontSize: 14, marginBottom: 10 }}>Or type this code at strm.app/pair</div>
+          <div className="t-mono" style={{
+            fontSize: 52, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '0.08em',
+            textShadow: '0 0 32px rgba(255,255,255,0.25)',
+          }}>{pairCode}</div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-2)', fontSize: 14 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)', animation: 'strm-halo 1.6s ease-in-out infinite' }} />
+          Waiting for phone…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OnbConnecting() {
+  const [msg, setMsg] = React.useState('Authenticating…');
+  React.useEffect(() => {
+    const msgs = ['Authenticating…', 'Fetching playlist…', 'Loading EPG…'];
+    let i = 0;
+    const t = setInterval(() => { i = (i+1) % msgs.length; setMsg(msgs[i]); }, 700);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div style={{ display: 'grid', gap: 28, justifyItems: 'center' }}>
+      <StrmPreloader size={120} />
+      <div className="t-display" style={{ fontSize: 44, fontWeight: 600, letterSpacing: '-0.02em' }}>{msg}</div>
+      <div style={{ color: 'var(--text-3)', fontSize: 16 }}>This usually takes a few seconds.</div>
+    </div>
+  );
+}
+
+function OnbSuccess() {
+  return (
+    <div style={{ display: 'grid', gap: 28, justifyItems: 'center', textAlign: 'center' }}>
+      <div style={{ position: 'relative', width: 140, height: 140, display: 'grid', placeItems: 'center' }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,200,250,0.3), transparent 60%)' }} />
+        <svg width="100" height="100" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="46" fill="none" stroke="var(--accent)" strokeWidth="2" opacity="0.3" />
+          <path d="M28 50 L44 66 L72 36" fill="none" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
+            style={{ strokeDasharray: 80, strokeDashoffset: 80, animation: 'strm-check 0.6s ease-out forwards' }} />
+        </svg>
+        <style>{`@keyframes strm-check { to { stroke-dashoffset: 0; } }`}</style>
+      </div>
+      <div className="t-display" style={{ fontSize: 56, fontWeight: 700, letterSpacing: '-0.03em' }}>Connected.</div>
+      <div style={{ fontSize: 22, color: 'var(--text-2)' }}>2,148 channels · 14,204 movies · 1,872 series</div>
+    </div>
+  );
+}
+
+/* -- pieces -- */
+function FieldPreview({ label, value }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
+      background: 'var(--glass-1)', border: '1px solid var(--stroke-1)', borderRadius: 10,
+      fontFamily: 'var(--font-mono)', fontSize: 14,
+    }}>
+      <div style={{ color: 'var(--text-3)', width: 120, fontFamily: 'var(--font-text)' }}>{label}</div>
+      <div style={{ color: 'var(--text-2)', flex: 1 }}>{value}</div>
+    </div>
+  );
+}
+
+function FocusButton({ children, primary, onClick, autoFocus, style, ...rest }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, [autoFocus]);
+  return (
+    <button ref={ref} onClick={onClick} className="focusable t-display" {...rest} style={{
+      padding: '18px 36px', borderRadius: 999, border: 'none', cursor: 'pointer',
+      background: primary ? 'var(--text-1)' : 'var(--glass-2)',
+      color: primary ? 'var(--ink-0)' : 'var(--text-1)',
+      fontWeight: 600, fontSize: 20, letterSpacing: '-0.01em',
+      display: 'inline-flex', alignItems: 'center',
+      boxShadow: primary ? '0 8px 32px rgba(255,255,255,0.2)' : 'inset 0 0 0 1px var(--stroke-2)',
+      ...style,
+    }}>{children}</button>
+  );
+}
+
+/* Deterministic QR-looking art — NOT a real QR (it's a pairing placeholder).
+   Pattern is reproducible from the pair code so it feels 'real' visually. */
+function QRArt({ seed, size = 200 }) {
+  const N = 21;
+  const cells = React.useMemo(() => {
+    // seeded pseudo-random
+    let h = 0; for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+    const rng = () => { h = (h * 9301 + 49297) % 233280; return h / 233280; };
+    const arr = Array.from({ length: N * N }, () => rng() > 0.52);
+    // three finder patterns (corners)
+    const finder = (cx, cy) => {
+      for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
+        const on = !(x > 1 && x < 5 && y > 1 && y < 5) && !(x === 0 || x === 6 || y === 0 || y === 6) ? true
+          : (x === 0 || x === 6 || y === 0 || y === 6) ? true
+          : (x >= 2 && x <= 4 && y >= 2 && y <= 4);
+        arr[(cy + y) * N + (cx + x)] = on;
+      }
+    };
+    finder(0, 0); finder(N - 7, 0); finder(0, N - 7);
+    // quiet zones around finders
+    for (let i = 0; i < 8; i++) {
+      if (i < N) { arr[7 * N + i] = false; arr[i * N + 7] = false; }
+      arr[(N - 8) * N + i] = false; arr[i * N + (N - 8)] = false;
+    }
+    return arr;
+  }, [seed]);
+
+  const c = size / N;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {cells.map((on, i) => on && (
+        <rect key={i} x={(i % N) * c + 0.5} y={Math.floor(i / N) * c + 0.5} width={c - 1} height={c - 1} rx={c * 0.22} fill="#000" />
+      ))}
+      {/* center STRM mark */}
+      <g transform={`translate(${size/2 - 16}, ${size/2 - 16})`}>
+        <rect width="32" height="32" rx="8" fill="#000" />
+        <g transform="translate(4,4) scale(0.375)">
+          <path d="M 48 14 C 40 8, 22 8, 16 18 C 10 28, 22 32, 32 34 C 42 36, 54 40, 48 50 C 42 60, 24 60, 16 54 L 22 50 L 50 34 L 22 18 Z" fill="#fff" />
+        </g>
+      </g>
+    </svg>
+  );
+}
+
+Object.assign(window, { Onboarding, FocusButton });
+</script>
+
+<script type="text/babel">
+/* Shell: top nav, focus manager, routing. */
+
+const ROUTES = [
+  { id: 'home',     label: 'Home' },
+  { id: 'live',     label: 'Live TV' },
+  { id: 'movies',   label: 'Movies' },
+  { id: 'series',   label: 'Series' },
+  { id: 'search',   label: 'Search' },
+  { id: 'settings', label: 'Settings' },
+];
+
+function TopNav({ route, setRoute, tweaks, setTweaksOpen }) {
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 40,
+      padding: '22px 60px', display: 'flex', alignItems: 'center', gap: 36,
+      background: 'linear-gradient(to bottom, rgba(10,10,14,0.85), rgba(10,10,14,0.5) 70%, transparent)',
+      backdropFilter: 'blur(24px)',
+      WebkitBackdropFilter: 'blur(24px)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <StrmWordmark size={22} />
+      </div>
+      <nav style={{ display: 'flex', gap: 4, flex: 1 }}>
+        {ROUTES.filter(r => r.id !== 'search' && r.id !== 'settings').map(r => (
+          <NavButton key={r.id} active={route === r.id} onClick={() => setRoute(r.id)}>{r.label}</NavButton>
+        ))}
+      </nav>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <NavIcon active={route === 'search'} onClick={() => setRoute('search')} title="Search">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="9" cy="9" r="6"/><path d="M13.5 13.5L17 17"/></svg>
+        </NavIcon>
+        <NavIcon active={route === 'settings'} onClick={() => setRoute('settings')} title="Settings">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="10" cy="10" r="3"/><path d="M10 1.5v2M10 16.5v2M18.5 10h-2M3.5 10h-2M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4M15.7 15.7l-1.4-1.4M5.7 5.7l-1.4-1.4"/></svg>
+        </NavIcon>
+        <button onClick={() => setRoute('settings')} title="Profile & settings" className="focusable" style={{
+          width: 36, height: 36, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+          background: 'linear-gradient(145deg,#2a2a2e,#141418)',
+          color: 'var(--text-1)', fontFamily:'var(--font-display)', fontWeight:700, fontSize:12,
+          display:'grid', placeItems:'center',
+          boxShadow: 'inset 0 0 0 1px var(--stroke-2)',
+        }}>KL</button>
+      </div>
+    </div>
+  );
+}
+
+function NavButton({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} className="focusable t-display" style={{
+      padding: '10px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
+      background: active ? 'var(--glass-3)' : 'transparent',
+      color: active ? 'var(--text-1)' : 'var(--text-2)',
+      fontSize: 17, fontWeight: active ? 600 : 500, letterSpacing: '-0.01em',
+      boxShadow: active ? 'inset 0 0 0 1px var(--stroke-2)' : 'none',
+    }}>{children}</button>
+  );
+}
+
+function NavIcon({ active, onClick, title, children }) {
+  return (
+    <button onClick={onClick} title={title} className="focusable" style={{
+      width: 40, height: 40, borderRadius: 20, border: 'none', cursor: 'pointer',
+      background: active ? 'var(--glass-3)' : 'var(--glass-1)',
+      color: active ? 'var(--text-1)' : 'var(--text-2)',
+      display: 'grid', placeItems: 'center',
+      boxShadow: active ? 'inset 0 0 0 1px var(--stroke-2)' : 'inset 0 0 0 1px var(--stroke-1)',
+    }}>{children}</button>
+  );
+}
+
+/* Rail with horizontal scroll + focus-follows-keyboard */
+function Rail({ title, subtitle, children, accessory }) {
+  const scrollerRef = React.useRef(null);
+  return (
+    <section style={{ margin: '40px 0' }}>
+      <div style={{ padding: '0 60px 18px', display: 'flex', alignItems: 'baseline', gap: 16 }}>
+        <h2 className="t-display" style={{ margin: 0, fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em' }}>{title}</h2>
+        {subtitle && <span style={{ color: 'var(--text-3)', fontSize: 14 }}>{subtitle}</span>}
+        <div style={{ flex: 1 }} />
+        {accessory}
+      </div>
+      <div ref={scrollerRef} className="rail" style={{
+        display: 'flex', gap: 16, padding: '12px 60px 30px',
+        overflowX: 'auto', scrollSnapType: 'x mandatory',
+      }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/* Remote hint — bottom legend toggleable */
+function RemoteLegend({ show }) {
+  if (!show) return null;
+  return (
+    <div style={{
+      position: 'fixed', bottom: 22, left: '50%', transform: 'translateX(-50%)',
+      display: 'flex', gap: 18, padding: '10px 20px',
+      background: 'var(--glass-2)', backdropFilter: 'var(--blur-med)',
+      border: '1px solid var(--stroke-1)', borderRadius: 999,
+      fontSize: 13, color: 'var(--text-2)', zIndex: 30,
+    }}>
+      <Key k="◀︎▲▼▶︎">Navigate</Key>
+      <Key k="OK">Select</Key>
+      <Key k="⏎">Play</Key>
+      <Key k="◁">Back</Key>
+      <Key k="≡">Menu</Key>
+    </div>
+  );
+}
+function Key({ k, children }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span style={{
+        padding: '3px 8px', borderRadius: 6,
+        background: 'rgba(255,255,255,0.10)', border: '1px solid var(--stroke-2)',
+        fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-1)', minWidth: 20, textAlign: 'center',
+      }}>{k}</span>
+      <span>{children}</span>
+    </span>
+  );
+}
+
+Object.assign(window, { TopNav, Rail, RemoteLegend, ROUTES });
+</script>
+
+<script type="text/babel">
+/* Home / Discovery — billboard hero + rails */
+
+function Home({ onOpen, tweaks, live }) {
+  // Build live rails from real Xtream catalog when available; else fall back.
+  const liveChannels = (live && live.status === 'ok' && live.catalog.live.channels.length)
+    ? live.catalog.live.channels.slice(0, 16).map(c => ({
+        id: 'lc' + c.stream_id, name: c.name, logo: c.stream_icon, cat: 'UK',
+        now: c.name, next: '', progress: 0.4 + (c.stream_id % 60) / 100, live: 'LIVE',
+        stream_id: c.stream_id, stream_type: 'live',
+      }))
+    : LIVE_CHANNELS.filter(c => c.live).concat(LIVE_CHANNELS.slice(0, 4)).slice(0, 8);
+
+  const liveMovies = (live && live.status === 'ok' && live.catalog.vod.movies.length)
+    ? live.catalog.vod.movies.slice(0, 16).map(m => ({
+        id: 'vm'+m.stream_id, title: m.name, genre: 'Movie', cover: m.stream_icon,
+        stream_id: m.stream_id, container_extension: m.container_extension, stream_type: 'movie',
+        year: (m.releasedate||'').slice(0,4), rating: m.rating,
+      }))
+    : MOVIES.slice(0, 10);
+  const liveSeries = (live && live.status === 'ok' && live.catalog.series.shows.length)
+    ? live.catalog.series.shows.slice(0, 16).map(s => ({
+        id: 'vs'+s.series_id, title: s.name, genre: 'Series', cover: s.cover,
+        seasons: s.num || 1, stream_type: 'series',
+      }))
+    : SERIES;
+  const [heroIdx, setHeroIdx] = React.useState(0);
+  const heroes = [MOVIES[0], MOVIES[4], SERIES[2], MOVIES[9]];
+  React.useEffect(() => {
+    const t = setInterval(() => setHeroIdx(i => (i + 1) % heroes.length), 6500);
+    return () => clearInterval(t);
+  }, []);
+  const hero = heroes[heroIdx];
+  const heroHue = hueFor(hero.title);
+
+  const shape = tweaks.tileShape || 'landscape';
+  const size = tweaks.density === 'compact' ? 'sm' : tweaks.density === 'spacious' ? 'lg' : 'md';
+
+  return (
+    <div>
+      {/* Billboard hero */}
+      <div style={{
+        position: 'relative', height: 720, margin: '0 60px',
+        borderRadius: 28, overflow: 'hidden',
+        background: `linear-gradient(145deg, ${heroHue.from}, ${heroHue.to})`,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06)',
+      }}>
+        {/* abstract bg */}
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 22px)' }}/>
+        <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: '70%', height: '120%', background: `radial-gradient(circle, ${heroHue.tint}33, transparent 60%)`, filter: 'blur(30px)' }}/>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70%', background: 'linear-gradient(to top, rgba(5,8,14,0.92), transparent)' }}/>
+        {tweaks.motion !== 'still' && (
+          <div style={{ position: 'absolute', inset: 0, opacity: 0.5, background: `radial-gradient(circle at 70% 40%, ${heroHue.tint}22, transparent 50%)`, animation: 'strm-halo 8s ease-in-out infinite' }}/>
+        )}
+
+        {/* content */}
+        <div style={{ position: 'absolute', bottom: 56, left: 56, right: 56, display: 'grid', gap: 20, maxWidth: 720 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <StrmMark size={28} animated />
+            <span className="t-eyebrow" style={{ color: heroHue.tint }}>FEATURED · {hero.kind === 'series' ? 'SERIES' : hero.genre?.toUpperCase() || 'MOVIE'}</span>
+          </div>
+          <div className="t-display" style={{ fontSize: 96, lineHeight: 0.95, fontWeight: 700, letterSpacing: '-0.04em', textShadow: '0 4px 24px rgba(0,0,0,0.4)' }}>
+            {hero.title}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: 'var(--text-2)', fontSize: 17 }}>
+            <span style={{ padding: '3px 8px', border: '1px solid var(--stroke-2)', borderRadius: 4, fontSize: 13, color: 'var(--text-1)' }}>{hero.rating || '12'}</span>
+            <span>{hero.year || '2025'}</span>
+            <span>{hero.runtime || `${hero.seasons || 3} Seasons`}</span>
+            <span>{hero.genre}</span>
+          </div>
+          <div style={{ fontSize: 20, color: 'var(--text-2)', lineHeight: 1.4, maxWidth: 620, textWrap: 'pretty' }}>
+            A tense, luminous drama about loyalty and the cost of keeping quiet. Critics call it one of the year's most assured debuts.
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <FocusButton primary autoFocus onClick={() => onOpen(hero)}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" style={{ marginRight: 10 }}><path d="M4 3l12 6-12 6z"/></svg>
+              Play
+            </FocusButton>
+            <FocusButton onClick={() => onOpen(hero)}>+ My List</FocusButton>
+            <FocusButton>More info</FocusButton>
+          </div>
+        </div>
+
+        {/* hero dots */}
+        <div style={{ position: 'absolute', top: 24, right: 24, display: 'flex', gap: 6 }}>
+          {heroes.map((_, i) => (
+            <div key={i} style={{ width: i === heroIdx ? 22 : 6, height: 4, borderRadius: 2, background: i === heroIdx ? 'var(--text-1)' : 'var(--text-4)', transition: 'all .3s var(--ease)' }}/>
+          ))}
+        </div>
+      </div>
+
+      <Rail title="Continue Watching" subtitle="Pick up where you left off">
+        {CONTINUE_WATCHING.map(item => (
+          <ContinueCard key={item.id} item={item} onClick={() => onOpen(item)} size={size}/>
+        ))}
+      </Rail>
+
+      <Rail title="Live Now" subtitle={live && live.status==='ok' ? `${live.catalog.live.channels.length} EU\u00a0|\u00a0UK channels` : 'Prime-time in the UK'} accessory={<LiveAccessory/>}>
+        {liveChannels.map((ch, i) => (
+          <LiveCard key={ch.id + i} ch={ch} onClick={() => onOpen(ch)} size={size}/>
+        ))}
+      </Rail>
+
+      <Rail title="Made For You" subtitle={live && live.status==='ok' ? 'Drawn from your EU | UK catalog' : 'Based on your preferences'}>
+        {liveMovies.map(m => <div key={m.id} onClick={()=>onOpen(m)} className="focusable" tabIndex={0} style={{ cursor:'pointer', scrollSnapAlign:'start', flexShrink:0 }}><Poster title={m.title} cover={m.cover} meta={`${m.year||''}${m.genre?' · '+m.genre:''}`.trim()} shape={shape === 'poster' ? 'poster' : shape === 'square' ? 'square' : 'landscape'} size={size}/></div>)}
+      </Rail>
+
+      <Rail title="Trending Series">
+        {liveSeries.map(s => <div key={s.id} onClick={()=>onOpen(s)} className="focusable" tabIndex={0} style={{ cursor:'pointer', scrollSnapAlign:'start', flexShrink:0 }}><Poster title={s.title} cover={s.cover} meta={s.meta || (s.seasons?`${s.seasons} Seasons`:'Series')} subtitle={s.genre} shape={shape === 'landscape' ? 'landscape' : shape === 'square' ? 'square' : 'poster'} size={size}/></div>)}
+      </Rail>
+
+      <Rail title="New in Cinema">
+        {(liveMovies.length > 8 ? liveMovies.slice(8) : MOVIES.slice(2)).map(m => <div key={m.id} onClick={()=>onOpen(m)} className="focusable" tabIndex={0} style={{ cursor:'pointer', scrollSnapAlign:'start', flexShrink:0 }}><Poster title={m.title} cover={m.cover} meta={m.genre} subtitle={`${m.year||''} ${m.runtime||''}`.trim()} shape={shape} size={size}/></div>)}
+      </Rail>
+
+      <div style={{ height: 60 }}/>
+    </div>
+  );
+}
+
+function ContinueCard({ item, onClick, size }) {
+  const hue = hueFor(item.title);
+  const w = size === 'sm' ? 260 : size === 'lg' ? 400 : 320;
+  const h = w * 0.56;
+  return (
+    <div onClick={onClick} tabIndex={0} className="focusable" style={{ width: w, cursor: 'pointer', scrollSnapAlign: 'start', flexShrink: 0 }}>
+      <div style={{ position: 'relative', width: w, height: h, borderRadius: 'var(--r-md)', overflow: 'hidden',
+        background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`,
+        boxShadow: '0 6px 24px rgba(0,0,0,0.4)' }}>
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 14px)' }}/>
+        <div style={{ position: 'absolute', top: '-30%', right: '-20%', width: '80%', height: '80%', background: `radial-gradient(circle, ${hue.tint}44, transparent 60%)`, filter: 'blur(20px)' }}/>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <div style={{ width: 56, height: 56, borderRadius: 28, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', display: 'grid', placeItems: 'center', border: '1px solid rgba(255,255,255,0.2)' }}>
+            <svg width="20" height="20" viewBox="0 0 18 18" fill="#fff"><path d="M4 3l12 6-12 6z"/></svg>
+          </div>
+        </div>
+        {/* progress bar */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: 'rgba(255,255,255,0.15)' }}>
+          <div style={{ height: '100%', width: `${item.progress * 100}%`, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }}/>
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <div className="t-display" style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>{item.title}</div>
+        <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 3 }}>{item.sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function LiveCard({ ch, onClick, size }) {
+  const w = size === 'sm' ? 260 : size === 'lg' ? 400 : 320;
+  const h = w * 0.56;
+  const hue = hueFor(ch.name);
+  return (
+    <div onClick={onClick} tabIndex={0} className="focusable" style={{ width: w, cursor: 'pointer', scrollSnapAlign: 'start', flexShrink: 0 }}>
+      <div style={{ position: 'relative', width: w, height: h, borderRadius: 'var(--r-md)', overflow: 'hidden',
+        background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`,
+        boxShadow: '0 6px 24px rgba(0,0,0,0.4)' }}>
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 14px)' }}/>
+        <div style={{ position: 'absolute', top: 10, left: 10 }}>
+          <ChannelMark name={ch.name} logo={ch.logo} size={36}/>
+        </div>
+        {ch.live && (
+          <div style={{ position: 'absolute', top: 14, right: 14, display: 'flex', alignItems: 'center', gap: 6,
+            padding: '4px 10px', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(10px)', borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em' }}>
+            <span className="live-dot"/>LIVE
+          </div>
+        )}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 14px 14px',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)' }}>
+          <div className="t-display" style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)' }}>{ch.now}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{ch.name}</div>
+        </div>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(255,255,255,0.12)' }}>
+          <div style={{ height: '100%', width: `${ch.progress * 100}%`, background: 'var(--live)' }}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveAccessory() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-2)', fontSize: 13 }}>
+      <span className="live-dot"/>
+      <span style={{ letterSpacing: '0.1em', textTransform: 'uppercase', fontSize: 11, fontWeight: 600 }}>On now</span>
+    </div>
+  );
+}
+
+Object.assign(window, { Home });
+</script>
+
+<script type="text/babel">
+/* Live TV — two views: mini-guide overlay + full EPG grid */
+
+function LiveTV({ onOpen, tweaks, live }) {
+  const [view, setView] = React.useState('mini'); // 'mini' | 'epg'
+  const [selCat, setSelCat] = React.useState('All');
+  // When live catalog is available, use real EU|UK categories + channels.
+  const usingLive = live && live.status === 'ok' && live.catalog.live.channels.length > 0;
+  const liveChans = usingLive ? live.catalog.live.channels.map(c => ({
+    id: 'lc' + c.stream_id, name: c.name, logo: c.stream_icon, cat: (live.catalog.live.categories.find(x => String(x.category_id) === String(c.category_id))?.category_name || 'UK'), now: c.name, next: '', progress: 0.3 + (c.stream_id % 70)/100, live: 'LIVE',
+    stream_id: c.stream_id, stream_type: 'live',
+  })) : LIVE_CHANNELS;
+  const cats = usingLive
+    ? ['All', ...new Set(liveChans.map(c => c.cat))]
+    : ['All', 'Entertainment', 'Sport', 'Movies', 'News', 'Documentary', 'Kids', 'Music'];
+  const [selChan, setSelChan] = React.useState(liveChans[0] || LIVE_CHANNELS[4]);
+  const filtered = selCat === 'All' ? liveChans : liveChans.filter(c => c.cat === selCat);
+
+  return (
+    <div style={{ padding: '0 60px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginBottom: 24 }}>
+        <h1 className="t-display" style={{ margin: 0, fontSize: 52, fontWeight: 700, letterSpacing: '-0.03em' }}>Live TV</h1>
+        <div style={{ display: 'flex', gap: 6, padding: 4, background: 'var(--glass-1)', border: '1px solid var(--stroke-1)', borderRadius: 12 }}>
+          {['mini', 'epg'].map(v => (
+            <button key={v} onClick={() => setView(v)} className="focusable t-display" style={{
+              padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: view === v ? 'var(--glass-3)' : 'transparent',
+              color: view === v ? 'var(--text-1)' : 'var(--text-2)', fontSize: 14, fontWeight: 500,
+              boxShadow: view === v ? 'inset 0 0 0 1px var(--stroke-2)' : 'none',
+            }}>{v === 'mini' ? 'Mini guide' : 'Full EPG'}</button>
+          ))}
+        </div>
+        <div style={{ flex: 1 }}/>
+        <div style={{ color: 'var(--text-3)', fontSize: 14 }}>{filtered.length} channels · {selCat}</div>
+      </div>
+
+      {view === 'mini' ? <MiniGuide ch={selChan} channels={filtered} cats={cats} selCat={selCat} setSelCat={setSelCat} setCh={setSelChan} onOpen={onOpen}/>
+        : <FullEPG channels={filtered} cats={cats} selCat={selCat} setSelCat={setSelCat} onOpen={onOpen}/>}
+    </div>
+  );
+}
+
+function MiniGuide({ ch, channels, cats, selCat, setSelCat, setCh, onOpen }) {
+  const hue = hueFor(ch.name);
+  const canPlay = ch.stream_type === 'live' && ch.stream_id;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 28, height: 720 }}>
+      {/* video preview */}
+      <div style={{ position: 'relative', borderRadius: 22, overflow: 'hidden',
+        background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06)' }}>
+        {canPlay ? (
+          <Player item={ch} autoPlay muted={false} />
+        ) : (
+          <>
+            <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 22px)' }}/>
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+              <StrmPreloader size={120} label={`${ch.name} · Live preview`}/>
+            </div>
+          </>
+        )}
+        <div style={{ position: 'absolute', top: 24, left: 24, display: 'flex', alignItems: 'center', gap: 12, zIndex: 3 }}>
+          <ChannelMark name={ch.name} logo={ch.logo} size={48}/>
+          <div>
+            <div className="t-display" style={{ fontSize: 22, fontWeight: 600 }}>{ch.name}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>{ch.cat}</div>
+          </div>
+          {ch.live && (
+            <div style={{ marginLeft: 8, display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em' }}>
+              <span className="live-dot"/>LIVE
+            </div>
+          )}
+        </div>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '28px 28px 24px', zIndex: 3,
+          background: 'linear-gradient(to top, rgba(5,8,14,0.92), transparent)' }}>
+          <div className="t-eyebrow" style={{ marginBottom: 8 }}>NOW PLAYING</div>
+          <div className="t-display" style={{ fontSize: 36, fontWeight: 700, letterSpacing: '-0.02em' }}>{ch.now}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
+            <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,0.15)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${ch.progress * 100}%`, background: 'var(--accent)', boxShadow: '0 0 8px rgba(255,255,255,0.4)' }}/>
+            </div>
+            <div style={{ color: 'var(--text-2)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{Math.round(ch.progress * 100)}% · Next: {ch.next || '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* channel list */}
+      <div className="glass" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', gap: 4, padding: 12, overflowX: 'auto', borderBottom: '1px solid var(--stroke-1)' }} className="rail">
+          {cats.slice(0, 20).map(c => (
+            <button key={c} onClick={() => setSelCat(c)} className="focusable" style={{
+              padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', flexShrink: 0,
+              background: selCat === c ? 'var(--glass-3)' : 'transparent',
+              color: selCat === c ? 'var(--text-1)' : 'var(--text-2)', fontSize: 13, fontWeight: 500,
+              fontFamily: 'var(--font-text)',
+            }}>{c}</button>
+          ))}
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }} className="rail">
+          {channels.slice(0, 400).map(c => {
+            const active = c.id === ch.id;
+            return (
+              <div key={c.id} onClick={() => setCh(c)} tabIndex={0} className="focusable" style={{
+                display: 'flex', gap: 12, alignItems: 'center', padding: '10px 14px', cursor: 'pointer',
+                background: active ? 'var(--glass-3)' : 'transparent',
+                borderLeft: active ? '3px solid var(--text-1)' : '3px solid transparent',
+              }}>
+                <ChannelMark name={c.name} logo={c.logo} size={40}/>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="t-display" style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                    {c.live && <span className="live-dot"/>}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.now}</div>
+                </div>
+              </div>
+            );
+          })}
+          {channels.length > 400 && (
+            <div style={{ padding: '14px 14px 18px', color: 'var(--text-3)', fontSize: 12, textAlign: 'center' }}>+{(channels.length - 400).toLocaleString()} more · filter by category</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FullEPG({ channels, cats, selCat, setSelCat, onOpen }) {
+  const timeSlots = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
+  const nowCol = 1.5; // which slot the playhead is in
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, overflowX: 'auto' }} className="rail">
+        {cats.map(c => (
+          <button key={c} onClick={() => setSelCat(c)} className="focusable" style={{
+            padding: '8px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', flexShrink: 0,
+            background: selCat === c ? 'var(--glass-3)' : 'var(--glass-1)',
+            color: selCat === c ? 'var(--text-1)' : 'var(--text-2)', fontSize: 14, fontWeight: 500,
+            fontFamily: 'var(--font-text)', boxShadow: 'inset 0 0 0 1px var(--stroke-1)',
+          }}>{c}</button>
+        ))}
+      </div>
+
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+        {/* time header */}
+        <div style={{ display: 'grid', gridTemplateColumns: `260px repeat(${timeSlots.length}, 1fr)`, borderBottom: '1px solid var(--stroke-1)', background: 'var(--glass-1)' }}>
+          <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-3)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>Channel</div>
+          {timeSlots.map(t => (
+            <div key={t} style={{ padding: '14px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-2)', borderLeft: '1px solid var(--stroke-1)' }}>{t}</div>
+          ))}
+        </div>
+
+        {/* rows */}
+        <div style={{ maxHeight: 560, overflowY: 'auto', position: 'relative' }} className="rail">
+          {/* now line */}
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(260px + ${(nowCol / timeSlots.length) * 100}% - 260px * ${nowCol / timeSlots.length})`, width: 2, background: 'var(--accent)', boxShadow: '0 0 10px var(--accent)', zIndex: 2, pointerEvents: 'none' }}/>
+          {channels.map(c => (
+            <div key={c.id} style={{ display: 'grid', gridTemplateColumns: `260px repeat(${timeSlots.length}, 1fr)`, borderBottom: '1px solid var(--stroke-1)', minHeight: 68 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '10px 14px', background: 'var(--glass-1)', borderRight: '1px solid var(--stroke-1)' }}>
+                <ChannelMark name={c.name} size={36}/>
+                <div style={{ minWidth: 0 }}>
+                  <div className="t-display" style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{c.cat}</div>
+                </div>
+              </div>
+              {/* schedule blocks — alternate sizes to feel real */}
+              {renderEpgRow(c, timeSlots.length).map((blk, i) => (
+                <div key={i} onClick={() => onOpen(c)} tabIndex={0} className="focusable" style={{
+                  gridColumn: `span ${blk.span}`, padding: '10px 12px', cursor: 'pointer',
+                  borderLeft: '1px solid var(--stroke-1)',
+                  background: blk.live ? 'rgba(90,200,250,0.07)' : 'transparent',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2,
+                }}>
+                  <div className="t-display" style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{blk.title}</div>
+                  {blk.span >= 2 && <div style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{blk.sub}</div>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderEpgRow(ch, total) {
+  // simple deterministic schedule based on channel name
+  let h = 0; for (let i = 0; i < ch.id.length; i++) h = (h * 31 + ch.id.charCodeAt(i)) | 0;
+  const rand = () => { h = (h * 9301 + 49297) % 233280; return h / 233280; };
+  const blocks = [];
+  let left = total;
+  const titles = [ch.now, ch.next, 'Up Next', 'Late Show', 'Headlines', 'Midnight Hour'];
+  let ti = 0;
+  while (left > 0) {
+    const span = Math.min(left, Math.floor(rand() * 2) + 1 + (rand() > 0.6 ? 1 : 0));
+    blocks.push({ title: titles[ti % titles.length], sub: '30 min · Drama', span, live: blocks.length === 0 });
+    left -= span; ti++;
+  }
+  return blocks;
+}
+
+Object.assign(window, { LiveTV });
+</script>
+
+<script type="text/babel">
+/* Movies, Series, Search, Settings, Detail */
+
+function Library({ items, title, subtitle, onOpen, tweaks, kind }) {
+  const [filter, setFilter] = React.useState('All');
+  const [limit, setLimit] = React.useState(60);
+  // Derive genres from unique category_names; cap at 12 for UI.
+  const genres = React.useMemo(() => {
+    const s = new Set(items.map(i => i.genre).filter(Boolean));
+    return ['All', ...[...s].slice(0, 12)];
+  }, [items]);
+  const filtered = filter === 'All' ? items : items.filter(i => i.genre === filter);
+  const visible = filtered.slice(0, limit);
+  const shape = kind === 'movies' ? 'poster' : 'poster';
+  const size = tweaks.density === 'compact' ? 'sm' : tweaks.density === 'spacious' ? 'lg' : 'md';
+  React.useEffect(() => { setLimit(60); }, [filter, items]);
+
+  return (
+    <div style={{ padding: '0 60px 60px' }}>
+      <div style={{ marginBottom: 32 }}>
+        <h1 className="t-display" style={{ margin: 0, fontSize: 52, fontWeight: 700, letterSpacing: '-0.03em' }}>{title}</h1>
+        {subtitle && <div style={{ color: 'var(--text-2)', fontSize: 18, marginTop: 8 }}>{subtitle}</div>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 32, overflowX: 'auto' }} className="rail">
+        {genres.map(g => (
+          <button key={g} onClick={() => setFilter(g)} className="focusable" style={{
+            padding: '8px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', flexShrink: 0,
+            background: filter === g ? 'var(--glass-3)' : 'var(--glass-1)',
+            color: filter === g ? 'var(--text-1)' : 'var(--text-2)', fontSize: 14, fontWeight: 500,
+            boxShadow: 'inset 0 0 0 1px var(--stroke-1)', fontFamily: 'var(--font-text)',
+          }}>{g}</button>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${size === 'sm' ? 160 : size === 'lg' ? 280 : 220}px, 1fr))`, gap: 22 }}>
+        {visible.map(i => (
+          <div key={i.id} onClick={() => onOpen(i)} className="focusable" tabIndex={0} style={{ cursor: 'pointer' }}>
+            <Poster title={i.title}
+              cover={i.cover}
+              meta={i.meta || i.genre}
+              subtitle={kind === 'movies' ? `${i.year||''} ${i.runtime?'· '+i.runtime:''}`.trim() : (i.lastEp || `${i.seasons||1} Seasons`)}
+              shape={shape} size={size}
+              style={{ width: '100%', height: 'auto', aspectRatio: shape === 'poster' ? '2/3' : '16/9' }}
+            />
+          </div>
+        ))}
+      </div>
+      {filtered.length > visible.length && (
+        <div style={{ display:'grid', placeItems:'center', marginTop: 32 }}>
+          <button onClick={() => setLimit(l => l + 60)} className="focusable" style={{
+            padding: '12px 24px', borderRadius: 10, border: 'none', cursor: 'pointer',
+            background: 'var(--glass-2)', color: 'var(--text-1)',
+            boxShadow: 'inset 0 0 0 1px var(--stroke-2)', fontSize: 14,
+          }}>Show more · {(filtered.length - visible.length).toLocaleString()} remaining</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Search({ onOpen, tweaks, live }) {
+  const [q, setQ] = React.useState('');
+  const pool = React.useMemo(() => {
+    if (live && live.status === 'ok') {
+      return [
+        ...live.catalog.vod.movies.slice(0, 2000).map(m => ({ id: 'm'+m.stream_id, title: m.name, kind: 'Movie', genre: 'Movie', cover: m.stream_icon, stream_id: m.stream_id, container_extension: m.container_extension, stream_type: 'movie' })),
+        ...live.catalog.series.shows.slice(0, 2000).map(s => ({ id: 's'+s.series_id, title: s.name, kind: 'Series', genre: 'Series', cover: s.cover, seasons: s.num, stream_type: 'series' })),
+        ...live.catalog.live.channels.slice(0, 2000).map(c => ({ id: 'l'+c.stream_id, title: c.name, kind: 'Live', genre: 'Live', cover: c.stream_icon, stream_id: c.stream_id, stream_type: 'live' })),
+      ];
+    }
+    return [
+      ...MOVIES.map(m => ({ ...m, kind: 'Movie' })),
+      ...SERIES.map(s => ({ ...s, kind: 'Series' })),
+      ...LIVE_CHANNELS.map(c => ({ ...c, title: c.name, kind: 'Live' })),
+    ];
+  }, [live]);
+  const results = q
+    ? pool.filter(i => i.title && i.title.toLowerCase().includes(q.toLowerCase())).slice(0, 120)
+    : pool.slice(0, 24);
+  const trending = ['Premier League', 'F1', 'Thriller', 'BBC', 'Sky', 'ITV', 'Netflix'];
+
+  return (
+    <div style={{ padding: '0 60px 60px' }}>
+      <h1 className="t-display" style={{ margin: '0 0 24px', fontSize: 52, fontWeight: 700, letterSpacing: '-0.03em' }}>Search</h1>
+
+      <div className="glass" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 24px', marginBottom: 32 }}>
+        <svg width="22" height="22" viewBox="0 0 20 20" fill="none" stroke="var(--text-2)" strokeWidth="1.8" strokeLinecap="round"><circle cx="9" cy="9" r="6"/><path d="M13.5 13.5L17 17"/></svg>
+        <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={live && live.status==='ok' ? `Search ${pool.length.toLocaleString()} titles…` : 'Find movies, series, channels…'} style={{
+          flex: 1, background: 'transparent', border: 'none', outline: 'none',
+          color: 'var(--text-1)', fontSize: 22, fontFamily: 'var(--font-display)', letterSpacing: '-0.01em',
+        }}/>
+        {q && <button onClick={() => setQ('')} style={{ background: 'var(--glass-2)', border: 'none', color: 'var(--text-2)', padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Clear</button>}
+      </div>
+
+      {!q && (
+        <div style={{ marginBottom: 32 }}>
+          <div className="t-eyebrow" style={{ marginBottom: 14 }}>Trending searches</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {trending.map(t => (
+              <button key={t} onClick={() => setQ(t)} className="focusable" style={{
+                padding: '10px 18px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                background: 'var(--glass-1)', color: 'var(--text-1)', fontSize: 15,
+                boxShadow: 'inset 0 0 0 1px var(--stroke-1)', fontFamily: 'var(--font-text)',
+              }}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="t-eyebrow" style={{ marginBottom: 14 }}>{q ? `${results.length} results${results.length===120?'+':''}` : 'You might like'}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 20 }}>
+        {results.map(i => (
+          <div key={i.id || (i.kind + i.title)} onClick={() => onOpen(i)} className="focusable" tabIndex={0} style={{ cursor: 'pointer' }}>
+            <Poster title={i.title} cover={i.cover} meta={i.kind.toUpperCase()} subtitle={i.genre || i.cat} shape="poster" size="md" style={{ width: '100%', height: 'auto', aspectRatio: '2/3' }}/>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Settings({ onReset, live }) {
+  const statusTxt = !live ? 'Unknown' : live.status === 'loading' ? 'Connecting…' : live.status === 'ok' ? `Connected · ${live.catalog.live.channels.length} live · ${live.catalog.vod.movies.length} VOD · ${live.catalog.series.shows.length} series` : `Offline · ${live.error || live.status} (CORS typical in browser; APK will connect)`;
+  const sections = [
+    {
+      title: 'Connection',
+      items: [
+        { label: 'Server URL', value: (window.STRM_CREDS && window.STRM_CREDS.dns) || 'not set', mono: true },
+        { label: 'Username', value: (window.STRM_CREDS && window.STRM_CREDS.username) || '—', mono: true },
+        { label: 'Password', value: '••••••••', mono: true },
+        { label: 'Method', value: 'Xtream Codes', pill: true },
+        { label: 'Region filter', value: 'EU | UK★', pill: true },
+        { label: 'Status', value: statusTxt, accent: live && live.status === 'ok' },
+      ],
+    },
+    {
+      title: 'Playback',
+      items: [
+        { label: 'Video quality', value: 'Auto (up to 4K HDR)', pill: true },
+        { label: 'Preferred audio', value: 'English (EN)', pill: true },
+        { label: 'Subtitles', value: 'Off', pill: true },
+        { label: 'Buffer', value: 'Balanced', pill: true },
+      ],
+    },
+    {
+      title: 'Display',
+      items: [
+        { label: 'Theme', value: 'Dark (Cinematic)', pill: true },
+        { label: 'Row density', value: 'Comfortable', pill: true },
+        { label: 'Reduce motion', value: 'Off', pill: true },
+      ],
+    },
+    {
+      title: 'About',
+      items: [
+        { label: 'Version', value: 'STRM 2.0 · build 241', mono: true },
+        { label: 'Device', value: 'Fire TV Stick 4K Max', mono: true },
+        { label: 'Storage', value: '186 MB used', mono: true },
+      ],
+    },
+  ];
+  return (
+    <div style={{ padding: '0 60px 60px', maxWidth: 960 }}>
+      <h1 className="t-display" style={{ margin: '0 0 40px', fontSize: 52, fontWeight: 700, letterSpacing: '-0.03em' }}>Settings</h1>
+      {sections.map(s => (
+        <div key={s.title} style={{ marginBottom: 28 }}>
+          <div className="t-eyebrow" style={{ marginBottom: 14 }}>{s.title}</div>
+          <div className="glass" style={{ padding: 0, overflow: 'hidden' }}>
+            {s.items.map((it, i) => (
+              <div key={it.label} className="focusable" tabIndex={0} style={{
+                display: 'flex', alignItems: 'center', padding: '18px 24px', gap: 20,
+                borderBottom: i < s.items.length - 1 ? '1px solid var(--stroke-1)' : 'none', cursor: 'pointer',
+              }}>
+                <div style={{ fontSize: 16, color: 'var(--text-1)', flex: 1 }}>{it.label}</div>
+                <div style={{
+                  fontSize: 15,
+                  color: it.accent ? 'var(--accent)' : 'var(--text-2)',
+                  fontFamily: it.mono ? 'var(--font-mono)' : 'var(--font-text)',
+                  padding: it.pill ? '6px 12px' : 0,
+                  background: it.pill ? 'var(--glass-2)' : 'transparent',
+                  borderRadius: it.pill ? 8 : 0,
+                  boxShadow: it.pill ? 'inset 0 0 0 1px var(--stroke-1)' : 'none',
+                }}>{it.value}</div>
+                <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="var(--text-3)" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l6 6-6 6"/></svg>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button onClick={onReset} className="focusable" style={{
+        marginTop: 20, padding: '14px 24px', borderRadius: 10, border: 'none', cursor: 'pointer',
+        background: 'var(--glass-2)', color: 'var(--text-2)', fontSize: 15, fontFamily: 'var(--font-text)',
+        boxShadow: 'inset 0 0 0 1px var(--stroke-1)',
+      }}>Disconnect & restart onboarding</button>
+    </div>
+  );
+}
+
+/* Detail overlay — movie / series / channel */
+function Detail({ item, onClose }) {
+  if (!item) return null;
+  const hue = hueFor(item.title || item.name);
+  const isSeries = item.seasons != null;
+  const isChannel = item.now != null;
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(5,8,14,0.75)', backdropFilter: 'blur(24px)',
+      display: 'grid', placeItems: 'center', padding: 60, animation: 'strm-fade .25s ease-out',
+    }}>
+      <style>{`@keyframes strm-fade { from { opacity: 0; } to { opacity: 1; }}`}</style>
+      <div onClick={e => e.stopPropagation()} className="glass" style={{
+        width: '100%', maxWidth: 1240, maxHeight: '86vh', overflow: 'hidden',
+        display: 'grid', gridTemplateColumns: '520px 1fr',
+        boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
+      }}>
+        {/* left hero */}
+        <div style={{
+          position: 'relative', background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`, minHeight: 620,
+        }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 22px)' }}/>
+          <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: '80%', height: '80%', background: `radial-gradient(circle, ${hue.tint}44, transparent 60%)`, filter: 'blur(30px)' }}/>
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+            <StrmPreloader size={100}/>
+          </div>
+          <div style={{ position: 'absolute', top: 24, left: 24 }}>
+            <StrmMark size={24}/>
+          </div>
+        </div>
+        {/* right content */}
+        <div style={{ padding: '44px 44px 36px', overflowY: 'auto' }} className="rail">
+          <div className="t-eyebrow" style={{ color: hue.tint, marginBottom: 12 }}>
+            {isChannel ? `LIVE · ${item.cat}` : isSeries ? `SERIES · ${item.genre}` : `MOVIE · ${item.genre}`}
+          </div>
+          <div className="t-display" style={{ fontSize: 56, lineHeight: 1, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 16 }}>
+            {item.title || item.name}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: 'var(--text-2)', fontSize: 15, marginBottom: 24 }}>
+            {item.rating && <span style={{ padding: '3px 8px', border: '1px solid var(--stroke-2)', borderRadius: 4, fontSize: 12, color: 'var(--text-1)' }}>{item.rating}</span>}
+            {item.year && <span>{item.year}</span>}
+            {item.runtime && <span>{item.runtime}</span>}
+            {item.seasons && <span>{item.seasons} Seasons · {item.lastEp}</span>}
+            {item.now && <span>Now: {item.now}</span>}
+            <span>★ 4.{Math.floor(Math.random()*9)+1}</span>
+          </div>
+          <div style={{ fontSize: 18, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 28, textWrap: 'pretty' }}>
+            A tense, luminous story about loyalty and the cost of keeping quiet. Filmed along the Northumberland coast, it balances quiet introspection with moments of genuine shock — the kind of television that earns its silences.
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 28, flexWrap: 'wrap' }}>
+            <FocusButton primary autoFocus onClick={onClose}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" style={{ marginRight: 10 }}><path d="M4 3l12 6-12 6z"/></svg>
+              Play
+            </FocusButton>
+            <FocusButton>+ My List</FocusButton>
+            <FocusButton>Trailer</FocusButton>
+          </div>
+
+          {isSeries && (
+            <div>
+              <div className="t-eyebrow" style={{ marginBottom: 12 }}>Episodes · Season {item.seasons}</div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {Array.from({length: 4}).map((_, i) => (
+                  <div key={i} className="focusable" tabIndex={0} style={{
+                    display: 'flex', gap: 14, padding: '10px', cursor: 'pointer',
+                    background: 'var(--glass-1)', border: '1px solid var(--stroke-1)', borderRadius: 12,
+                  }}>
+                    <div style={{ width: 120, height: 68, borderRadius: 8, background: `linear-gradient(145deg, ${hue.from}, ${hue.to})`, flexShrink: 0, display: 'grid', placeItems: 'center' }}>
+                      <StrmMark size={16}/>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="t-display" style={{ fontSize: 15, fontWeight: 600 }}>Episode {i+1} · "Tideline"</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>48 min</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>An unexpected visitor forces the family to confront a long-buried secret as the storm rolls in.</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <button onClick={onClose} className="focusable" style={{
+        position: 'fixed', top: 28, right: 28, width: 44, height: 44, borderRadius: 22,
+        border: 'none', background: 'var(--glass-2)', color: 'var(--text-1)', cursor: 'pointer',
+        display: 'grid', placeItems: 'center', fontSize: 20, boxShadow: 'inset 0 0 0 1px var(--stroke-2)',
+      }}>×</button>
+    </div>
+  );
+}
+
+Object.assign(window, { Library, Search, Settings, Detail });
+</script>
+
+<script type="text/babel">
+/* Root app: route manager + tweaks + prototype shell */
+
+const DEFAULT_TWEAKS = /*EDITMODE-BEGIN*/{
+  "background":   "deep",
+  "density":      "comfortable",
+  "tileShape":    "landscape",
+  "motion":       "subtle",
+  "remoteLegend": true
+}/*EDITMODE-END*/;
+
+const BACKGROUNDS = {
+  deep:   'oklch(0.12 0.005 250)',
+  darker: 'oklch(0.07 0.004 250)',
+  pure:   'oklch(0.04 0 0)',
+};
+
+function App() {
+  const [stage, setStage] = React.useState(() => localStorage.getItem('strm-stage') || 'onboarding');
+  const [route, setRoute] = React.useState(() => localStorage.getItem('strm-route') || 'home');
+  const [detail, setDetail] = React.useState(null);
+  const live = useCatalog(true); // attempt real Xtream fetch; falls back silently on CORS
+  const [tweaks, setTweaks] = React.useState(() => {
+    try { return { ...DEFAULT_TWEAKS, ...JSON.parse(localStorage.getItem('strm-tweaks') || '{}') }; }
+    catch { return DEFAULT_TWEAKS; }
+  });
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+
+  React.useEffect(() => { localStorage.setItem('strm-stage', stage); }, [stage]);
+  React.useEffect(() => { localStorage.setItem('strm-route', route); }, [route]);
+  React.useEffect(() => { localStorage.setItem('strm-tweaks', JSON.stringify(tweaks)); }, [tweaks]);
+
+  // Apply token overrides
+  React.useEffect(() => {
+    const r = document.documentElement.style;
+    r.setProperty('--ink-0', BACKGROUNDS[tweaks.background] || BACKGROUNDS.deep);
+  }, [tweaks.background]);
+
+  // Edit-mode bridge
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === '__activate_edit_mode')   setTweaksOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const patchTweaks = (p) => {
+    setTweaks(t => ({ ...t, ...p }));
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: p }, '*');
+  };
+
+  // Global keyboard (Esc closes detail, B back, nav with 1-6)
+  React.useEffect(() => {
+    const k = (e) => {
+      if (e.key === 'Escape') { if (detail) setDetail(null); }
+      if (e.key >= '1' && e.key <= '6' && stage === 'app') {
+        const r = ROUTES[parseInt(e.key, 10) - 1];
+        if (r) setRoute(r.id);
+      }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [stage, detail]);
+
+  if (stage === 'onboarding') {
+    return <Onboarding onDone={() => setStage('app')}/>;
+  }
+
+  return (
+    <div className="strm-root" style={{ minHeight: '100vh' }}>
+      <TopNav route={route} setRoute={setRoute}/>
+      <main>
+        {route === 'home'     && <Home      onOpen={setDetail} tweaks={tweaks} live={live}/>}
+        {route === 'live'     && <LiveTV    onOpen={setDetail} tweaks={tweaks} live={live}/>}
+        {route === 'movies'   && <Library   title="Movies"  subtitle={live.status==='ok' ? `${live.catalog.vod.movies.length.toLocaleString()} EU\u00a0|\u00a0UK titles` : 'Awaiting connection \u00b7 showing preview'}  items={live.status==='ok' ? live.catalog.vod.movies.map(m=>({id:m.stream_id,title:m.name,genre:m.category_name||'Movie',rating:m.rating,year:m.releasedate||'',runtime:'',cover:m.stream_icon,container_extension:m.container_extension,stream_type:'movie'})) : MOVIES}  kind="movies" onOpen={setDetail} tweaks={tweaks}/>}
+        {route === 'series'   && <Library   title="Series"  subtitle={live.status==='ok' ? `${live.catalog.series.shows.length.toLocaleString()} EU\u00a0|\u00a0UK shows` : 'Awaiting connection \u00b7 showing preview'}  items={live.status==='ok' ? live.catalog.series.shows.map(s=>({id:s.series_id,title:s.name,genre:s.genre||'Series',seasons:s.num||1,lastEp:s.last_modified||'',cover:s.cover,stream_type:'series'})) : SERIES}  kind="series" onOpen={setDetail} tweaks={tweaks}/>}
+        {route === 'search'   && <Search    onOpen={setDetail} tweaks={tweaks} live={live}/>}
+        {route === 'settings' && <Settings  onReset={() => { setStage('onboarding'); localStorage.removeItem('strm-stage'); }} live={live}/>}
+      </main>
+      {detail && <Detail item={detail} onClose={() => setDetail(null)}/>}
+      <RemoteLegend show={tweaks.remoteLegend && !detail}/>
+      {tweaksOpen && <TweaksPanel tweaks={tweaks} patch={patchTweaks} onClose={() => setTweaksOpen(false)}/>}
+    </div>
+  );
+}
+
+function TweaksPanel({ tweaks, patch, onClose }) {
+  const Row = ({ label, children }) => (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
+      {children}
+    </div>
+  );
+  const Chip = ({ on, onClick, children }) => (
+    <button onClick={onClick} style={{
+      padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+      background: on ? 'var(--glass-3)' : 'var(--glass-1)', color: on ? 'var(--text-1)' : 'var(--text-2)',
+      fontSize: 13, boxShadow: on ? 'inset 0 0 0 1px var(--stroke-3)' : 'inset 0 0 0 1px var(--stroke-1)',
+      fontFamily: 'var(--font-text)',
+    }}>{children}</button>
+  );
+  return (
+    <div className="glass" style={{
+      position: 'fixed', bottom: 22, right: 22, width: 300, padding: 20, zIndex: 80,
+      display: 'grid', gap: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div className="t-display" style={{ fontSize: 18, fontWeight: 600 }}>Tweaks</div>
+        <div style={{ flex: 1 }}/>
+        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+
+      <Row label="Background">
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['deep','darker','pure'].map(b => <Chip key={b} on={tweaks.background === b} onClick={() => patch({ background: b })}>{b}</Chip>)}
+        </div>
+      </Row>
+
+      <Row label="Row density">
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['compact','comfortable','spacious'].map(d => <Chip key={d} on={tweaks.density === d} onClick={() => patch({ density: d })}>{d.slice(0,4)}</Chip>)}
+        </div>
+      </Row>
+
+      <Row label="Tile shape">
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['landscape','poster','square'].map(s => <Chip key={s} on={tweaks.tileShape === s} onClick={() => patch({ tileShape: s })}>{s}</Chip>)}
+        </div>
+      </Row>
+
+      <Row label="Motion">
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['still','subtle','parallax'].map(m => <Chip key={m} on={tweaks.motion === m} onClick={() => patch({ motion: m })}>{m}</Chip>)}
+        </div>
+      </Row>
+
+      <Row label="Remote legend">
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Chip on={tweaks.remoteLegend} onClick={() => patch({ remoteLegend: true })}>On</Chip>
+          <Chip on={!tweaks.remoteLegend} onClick={() => patch({ remoteLegend: false })}>Off</Chip>
+        </div>
+      </Row>
+    </div>
+  );
+}
+
+Object.assign(window, { App, DEFAULT_TWEAKS });
+</script>
+
+<script type="text/babel">
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
