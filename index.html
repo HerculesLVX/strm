@@ -353,7 +353,15 @@ function ChannelMark({ name, logo, size = 44 }) {
   );
 }
 
-Object.assign(window, { Poster, ChannelMark, hueFor });
+/* Deterministic star rating (1 decimal, 4.1–4.9) derived from title string.
+   Avoids Math.random() which produces a new value on every render. */
+function seededRating(str) {
+  let h = 0;
+  for (let i = 0; i < (str || '').length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return (4.1 + (h % 9) * 0.1).toFixed(1);
+}
+
+Object.assign(window, { Poster, ChannelMark, hueFor, seededRating });
 </script>
 
 <script type="text/babel">
@@ -439,13 +447,18 @@ Object.assign(window, { LIVE_CHANNELS, MOVIES, SERIES, CONTINUE_WATCHING });
  * The native APK / WebView with relaxed CORS will work end-to-end.
  */
 
-const STRM_CREDS = /*EDITMODE-BEGIN-CREDS*/{
-  "dns":      "http://riqzeijs.enedns.com",
-  "username": "ANH4FFCM",
-  "password": "CNHUEX89",
-  "method":   "xtream",
-  "region":   "EU | UK"
-}/*EDITMODE-END-CREDS*/;
+/* STRM_CREDS — loaded from localStorage on startup; mutated in-place when
+   the user saves credentials via onboarding or Settings. Using a mutable
+   object (let + Object.assign) means xtUrl/xtFetch always see current values
+   without needing React state for a non-UI concern. */
+let STRM_CREDS = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('strm-creds') || 'null');
+    if (stored && stored.dns && stored.username) return stored;
+  } catch {}
+  return { dns: '', username: '', password: '', method: 'xtream', region: 'EU | UK' };
+})();
+window.STRM_CREDS = STRM_CREDS;
 
 function xtUrl(action, extra = {}) {
   const { dns, username, password } = STRM_CREDS;
@@ -532,11 +545,13 @@ async function loadCatalog() {
   };
 }
 
-/* React hook: exposes { status, catalog, error }. status ∈ 'idle'|'loading'|'ok'|'offline' */
+/* React hook: exposes { status, catalog, error }. status ∈ 'idle'|'loading'|'ok'|'offline'
+   enabled: pass !!(STRM_CREDS.dns) so the hook re-fires when credentials are saved. */
 function useCatalog(enabled) {
   const [state, setState] = React.useState({ status: enabled ? 'loading' : 'idle', catalog: null, error: null });
   React.useEffect(() => {
     if (!enabled) return;
+    setState({ status: 'loading', catalog: null, error: null });
     let cancel = false;
     (async () => {
       const r = await loadCatalog();
@@ -729,7 +744,9 @@ Object.assign(window, { Player, resolveStreamUrl, loadHls });
 
 function Onboarding({ onDone }) {
   const [step, setStep] = React.useState(0);
+  const [showManual, setShowManual] = React.useState(false);
   const [method, setMethod] = React.useState('xtream'); // 'xtream' | 'm3u'
+  const [manualCreds, setManualCreds] = React.useState({ dns: '', username: '', password: '', m3u: '' });
   const [pairCode] = React.useState(() => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let s = ''; for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
@@ -737,13 +754,13 @@ function Onboarding({ onDone }) {
   });
   const [autoProgress, setAutoProgress] = React.useState(false);
 
-  // When on step 2 (pair), simulate that the phone side pushed creds after 4s
+  // Simulate phone-side pairing after 4 s (only when QR tab is visible)
   React.useEffect(() => {
-    if (step === 1 && autoProgress) {
+    if (step === 1 && !showManual && autoProgress) {
       const t = setTimeout(() => setStep(2), 4000);
       return () => clearTimeout(t);
     }
-  }, [step, autoProgress]);
+  }, [step, autoProgress, showManual]);
 
   React.useEffect(() => {
     if (step === 2) {
@@ -756,11 +773,35 @@ function Onboarding({ onDone }) {
     }
   }, [step, onDone]);
 
+  const handleManualConnect = () => {
+    const creds = method === 'm3u'
+      ? { m3u: manualCreds.m3u.trim(), method: 'm3u', region: 'EU | UK' }
+      : {
+          dns: manualCreds.dns.trim().replace(/\/$/, ''),
+          username: manualCreds.username.trim(),
+          password: manualCreds.password,
+          method: 'xtream',
+          region: 'EU | UK',
+        };
+    localStorage.setItem('strm-creds', JSON.stringify(creds));
+    Object.assign(window.STRM_CREDS, creds);
+    setStep(2);
+  };
+
   return (
     <div className="strm-root" style={{ minHeight: '100%', height: '100%', display: 'grid', placeItems: 'center', padding: 60 }}>
       <div style={{ width: '100%', maxWidth: 1100, display: 'grid', gap: 48, justifyItems: 'center' }}>
         {step === 0 && <OnbWelcome onNext={() => { setStep(1); setAutoProgress(true); }} />}
-        {step === 1 && <OnbPair method={method} setMethod={setMethod} pairCode={pairCode} onManual={() => setStep(2)} />}
+        {step === 1 && !showManual && (
+          <OnbPair method={method} setMethod={setMethod} pairCode={pairCode}
+            onManual={() => { setShowManual(true); setAutoProgress(false); }} />
+        )}
+        {step === 1 && showManual && (
+          <OnbManualEntry method={method} setMethod={setMethod}
+            creds={manualCreds} setCreds={setManualCreds}
+            onConnect={handleManualConnect}
+            onBack={() => { setShowManual(false); setAutoProgress(true); }} />
+        )}
         {step === 2 && <OnbConnecting />}
         {step === 3 && <OnbSuccess />}
       </div>
@@ -845,7 +886,7 @@ function OnbPair({ method, setMethod, pairCode, onManual }) {
         <button onClick={onManual} className="focusable" style={{
           background: 'transparent', border: 'none', color: 'var(--text-2)', textAlign: 'left',
           fontFamily: 'var(--font-text)', fontSize: 15, padding: '8px 0', cursor: 'pointer', width: 'fit-content',
-        }}>Enter details manually instead →</button>
+        }}>Enter details manually →</button>
       </div>
 
       {/* Right: pair code card */}
@@ -983,7 +1024,115 @@ function QRArt({ seed, size = 200 }) {
   );
 }
 
-Object.assign(window, { Onboarding, FocusButton });
+/* Manual credential entry — shown when the user clicks "Enter details manually" */
+function OnbManualEntry({ method, setMethod, creds, setCreds, onConnect, onBack }) {
+  const [error, setError] = React.useState('');
+
+  const handleConnect = () => {
+    if (method === 'xtream') {
+      if (!creds.dns)       { setError('Server URL is required'); return; }
+      if (!creds.username)  { setError('Username is required'); return; }
+      if (!creds.password)  { setError('Password is required'); return; }
+    } else {
+      if (!creds.m3u)       { setError('M3U URL is required'); return; }
+    }
+    setError('');
+    onConnect();
+  };
+
+  const tabStyle = (active) => ({
+    padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer',
+    background: active ? 'var(--glass-3)' : 'transparent',
+    color: active ? 'var(--text-1)' : 'var(--text-2)',
+    fontWeight: 500, fontSize: 16, letterSpacing: '-0.01em',
+    boxShadow: active ? 'inset 0 0 0 1px var(--stroke-2)' : 'none',
+    fontFamily: 'var(--font-display)',
+  });
+
+  return (
+    <div style={{ width: '100%', maxWidth: 600, display: 'grid', gap: 36 }}>
+      <div>
+        <button onClick={onBack} className="focusable" style={{
+          background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer',
+          fontSize: 15, fontFamily: 'var(--font-text)', padding: '0 0 8px',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>← Back</button>
+        <div className="t-eyebrow" style={{ marginTop: 12 }}>Connect your server</div>
+        <div className="t-display" style={{ fontSize: 56, lineHeight: 1.05, fontWeight: 700, letterSpacing: '-0.03em', marginTop: 8 }}>
+          Enter details
+        </div>
+      </div>
+
+      {/* Method tabs */}
+      <div style={{ display: 'flex', gap: 4, padding: 4, background: 'var(--glass-1)', border: '1px solid var(--stroke-1)', borderRadius: 14, width: 'fit-content' }}>
+        {[{ id: 'xtream', label: 'Xtream Codes' }, { id: 'm3u', label: 'M3U URL' }].map(m => (
+          <button key={m.id} onClick={() => { setMethod(m.id); setError(''); }} style={tabStyle(method === m.id)}>{m.label}</button>
+        ))}
+      </div>
+
+      {method === 'xtream' ? (
+        <div style={{ display: 'grid', gap: 14 }}>
+          <FormField label="Server URL" placeholder="http://yourserver.com:8080" value={creds.dns}
+            onChange={v => setCreds(c => ({ ...c, dns: v }))} />
+          <FormField label="Username" placeholder="username" value={creds.username}
+            onChange={v => setCreds(c => ({ ...c, username: v }))} />
+          <FormField label="Password" placeholder="password" type="password" value={creds.password}
+            onChange={v => setCreds(c => ({ ...c, password: v }))} />
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14 }}>
+          <FormField label="M3U Playlist URL" placeholder="http://yourserver.com/get.php?username=…" value={creds.m3u}
+            onChange={v => setCreds(c => ({ ...c, m3u: v }))} />
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: 14, color: 'var(--live)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 6a1 1 0 011 1v2a1 1 0 01-2 0V8a1 1 0 011-1zm0-3a1 1 0 110 2 1 1 0 010-2z"/></svg>
+          {error}
+        </div>
+      )}
+
+      <FocusButton primary onClick={handleConnect} autoFocus>
+        Connect
+        <span style={{ marginLeft: 12, opacity: 0.65 }}>→</span>
+      </FocusButton>
+
+      <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        Your credentials are stored locally on this device and never shared.
+        CORS restrictions in browsers may prevent live data from loading — the APK will connect directly.
+      </div>
+    </div>
+  );
+}
+
+/* Reusable labelled text/password input */
+function FormField({ label, value, onChange, placeholder, type = 'text' }) {
+  return (
+    <div style={{ display: 'grid', gap: 7 }}>
+      <div style={{ fontSize: 14, color: 'var(--text-2)', fontFamily: 'var(--font-display)', fontWeight: 500 }}>{label}</div>
+      <div className="glass" style={{ padding: '0 18px', borderRadius: 'var(--r-md)' }}>
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            width: '100%', height: 52, background: 'transparent',
+            border: 'none', outline: 'none',
+            color: 'var(--text-1)', fontSize: 16,
+            fontFamily: type === 'password' ? 'var(--font-mono)' : 'var(--font-display)',
+            letterSpacing: type === 'password' ? '0.06em' : 'normal',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Onboarding, FocusButton, FormField, OnbManualEntry });
 </script>
 
 <script type="text/babel">
@@ -1117,7 +1266,7 @@ Object.assign(window, { TopNav, Rail, RemoteLegend, ROUTES });
 <script type="text/babel">
 /* Home / Discovery — billboard hero + rails */
 
-function Home({ onOpen, tweaks, live }) {
+function Home({ onOpen, tweaks, live, onPlay, myList = [], onToggleMyList }) {
   // Build live rails from real Xtream catalog when available; else fall back.
   const liveChannels = (live && live.status === 'ok' && live.catalog.live.channels.length)
     ? live.catalog.live.channels.slice(0, 16).map(c => ({
@@ -1188,12 +1337,14 @@ function Home({ onOpen, tweaks, live }) {
             A tense, luminous drama about loyalty and the cost of keeping quiet. Critics call it one of the year's most assured debuts.
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            <FocusButton primary autoFocus onClick={() => onOpen(hero)}>
+            <FocusButton primary autoFocus onClick={() => onPlay ? onPlay(hero) : onOpen(hero)}>
               <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" style={{ marginRight: 10 }}><path d="M4 3l12 6-12 6z"/></svg>
               Play
             </FocusButton>
-            <FocusButton onClick={() => onOpen(hero)}>+ My List</FocusButton>
-            <FocusButton>More info</FocusButton>
+            <FocusButton onClick={() => onToggleMyList && onToggleMyList(hero)}>
+              {myList.some(i => String(i.id || i.stream_id || i.title) === String(hero.id || hero.stream_id || hero.title)) ? '✓ My List' : '+ My List'}
+            </FocusButton>
+            <FocusButton onClick={() => onOpen(hero)}>More info</FocusButton>
           </div>
         </div>
 
@@ -1207,9 +1358,24 @@ function Home({ onOpen, tweaks, live }) {
 
       <Rail title="Continue Watching" subtitle="Pick up where you left off">
         {CONTINUE_WATCHING.map(item => (
-          <ContinueCard key={item.id} item={item} onClick={() => onOpen(item)} size={size}/>
+          <ContinueCard key={item.id} item={item} onClick={() => onPlay ? onPlay(item) : onOpen(item)} size={size}/>
         ))}
       </Rail>
+
+      {myList.length > 0 && (
+        <Rail title="My List" subtitle={`${myList.length} title${myList.length !== 1 ? 's' : ''}`}>
+          {myList.map(item => (
+            <div key={String(item.id || item.stream_id || item.title)} className="focusable" tabIndex={0}
+              style={{ cursor: 'pointer', scrollSnapAlign: 'start', flexShrink: 0 }}
+              onClick={() => onOpen(item)}>
+              <Poster title={item.title || item.name} cover={item.cover}
+                meta={item.genre || item.cat}
+                shape={shape === 'poster' ? 'poster' : shape === 'square' ? 'square' : 'landscape'}
+                size={size} />
+            </div>
+          ))}
+        </Rail>
+      )}
 
       <Rail title="Live Now" subtitle={live && live.status==='ok' ? `${live.catalog.live.channels.length} EU\u00a0|\u00a0UK channels` : 'Prime-time in the UK'} accessory={<LiveAccessory/>}>
         {liveChannels.map((ch, i) => (
@@ -1710,11 +1876,13 @@ function Settings({ onReset, live }) {
 }
 
 /* Detail overlay — movie / series / channel */
-function Detail({ item, onClose }) {
+function Detail({ item, onClose, onPlay, myList = [], onToggleMyList }) {
   if (!item) return null;
   const hue = hueFor(item.title || item.name);
   const isSeries = item.seasons != null;
   const isChannel = item.now != null;
+  const itemKey = String(item.id || item.stream_id || item.series_id || item.title || '');
+  const inList = myList.some(i => String(i.id || i.stream_id || i.series_id || i.title || '') === itemKey);
 
   return (
     <div onClick={onClose} style={{
@@ -1754,17 +1922,19 @@ function Detail({ item, onClose }) {
             {item.runtime && <span>{item.runtime}</span>}
             {item.seasons && <span>{item.seasons} Seasons · {item.lastEp}</span>}
             {item.now && <span>Now: {item.now}</span>}
-            <span>★ 4.{Math.floor(Math.random()*9)+1}</span>
+            <span>★ {seededRating(item.title || item.name)}</span>
           </div>
           <div style={{ fontSize: 18, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 28, textWrap: 'pretty' }}>
             A tense, luminous story about loyalty and the cost of keeping quiet. Filmed along the Northumberland coast, it balances quiet introspection with moments of genuine shock — the kind of television that earns its silences.
           </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 28, flexWrap: 'wrap' }}>
-            <FocusButton primary autoFocus onClick={onClose}>
+            <FocusButton primary autoFocus onClick={() => { onClose(); onPlay && onPlay(item); }}>
               <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" style={{ marginRight: 10 }}><path d="M4 3l12 6-12 6z"/></svg>
               Play
             </FocusButton>
-            <FocusButton>+ My List</FocusButton>
+            <FocusButton onClick={() => onToggleMyList && onToggleMyList(item)}>
+              {inList ? '✓ In My List' : '+ My List'}
+            </FocusButton>
             <FocusButton>Trailer</FocusButton>
           </div>
 
@@ -1821,11 +1991,49 @@ const BACKGROUNDS = {
   pure:   'oklch(0.04 0 0)',
 };
 
+/* Fullscreen player overlay — renders above everything (z-index 100). */
+function PlayerModal({ item, onClose }) {
+  React.useEffect(() => {
+    const k = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 100, background: '#000',
+      animation: 'strm-fade .2s ease-out',
+    }}>
+      <Player item={item} autoPlay fill onClose={onClose} />
+    </div>
+  );
+}
+
 function App() {
   const [stage, setStage] = React.useState(() => localStorage.getItem('strm-stage') || 'onboarding');
   const [route, setRoute] = React.useState(() => localStorage.getItem('strm-route') || 'home');
   const [detail, setDetail] = React.useState(null);
-  const live = useCatalog(true); // attempt real Xtream fetch; falls back silently on CORS
+  const [playing, setPlaying] = React.useState(null);
+
+  // Only attempt Xtream fetch when credentials exist.
+  const live = useCatalog(!!(window.STRM_CREDS && window.STRM_CREDS.dns));
+
+  const [myList, setMyList] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('strm-mylist') || '[]'); }
+    catch { return []; }
+  });
+
+  const toggleMyList = (item) => {
+    setMyList(list => {
+      const key = String(item.id || item.stream_id || item.series_id || item.title || '');
+      const idx = list.findIndex(i => String(i.id || i.stream_id || i.series_id || i.title || '') === key);
+      const next = idx >= 0 ? list.filter((_, j) => j !== idx) : [...list, item];
+      localStorage.setItem('strm-mylist', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handlePlay = (item) => { setDetail(null); setPlaying(item); };
+
   const [tweaks, setTweaks] = React.useState(() => {
     try { return { ...DEFAULT_TWEAKS, ...JSON.parse(localStorage.getItem('strm-tweaks') || '{}') }; }
     catch { return DEFAULT_TWEAKS; }
@@ -1858,18 +2066,21 @@ function App() {
     window.parent.postMessage({ type: '__edit_mode_set_keys', edits: p }, '*');
   };
 
-  // Global keyboard (Esc closes detail, B back, nav with 1-6)
+  // Global keyboard: Esc closes overlays in order (player → detail → nothing); 1–6 nav
   React.useEffect(() => {
     const k = (e) => {
-      if (e.key === 'Escape') { if (detail) setDetail(null); }
-      if (e.key >= '1' && e.key <= '6' && stage === 'app') {
+      if (e.key === 'Escape') {
+        if (playing) { setPlaying(null); return; }
+        if (detail)  { setDetail(null); return; }
+      }
+      if (e.key >= '1' && e.key <= '6' && stage === 'app' && !playing && !detail) {
         const r = ROUTES[parseInt(e.key, 10) - 1];
         if (r) setRoute(r.id);
       }
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [stage, detail]);
+  }, [stage, detail, playing]);
 
   if (stage === 'onboarding') {
     return <Onboarding onDone={() => setStage('app')}/>;
@@ -1879,15 +2090,29 @@ function App() {
     <div className="strm-root" style={{ minHeight: '100vh' }}>
       <TopNav route={route} setRoute={setRoute}/>
       <main>
-        {route === 'home'     && <Home      onOpen={setDetail} tweaks={tweaks} live={live}/>}
-        {route === 'live'     && <LiveTV    onOpen={setDetail} tweaks={tweaks} live={live}/>}
-        {route === 'movies'   && <Library   title="Movies"  subtitle={live.status==='ok' ? `${live.catalog.vod.movies.length.toLocaleString()} EU\u00a0|\u00a0UK titles` : 'Awaiting connection \u00b7 showing preview'}  items={live.status==='ok' ? live.catalog.vod.movies.map(m=>({id:m.stream_id,title:m.name,genre:m.category_name||'Movie',rating:m.rating,year:m.releasedate||'',runtime:'',cover:m.stream_icon,container_extension:m.container_extension,stream_type:'movie'})) : MOVIES}  kind="movies" onOpen={setDetail} tweaks={tweaks}/>}
-        {route === 'series'   && <Library   title="Series"  subtitle={live.status==='ok' ? `${live.catalog.series.shows.length.toLocaleString()} EU\u00a0|\u00a0UK shows` : 'Awaiting connection \u00b7 showing preview'}  items={live.status==='ok' ? live.catalog.series.shows.map(s=>({id:s.series_id,title:s.name,genre:s.genre||'Series',seasons:s.num||1,lastEp:s.last_modified||'',cover:s.cover,stream_type:'series'})) : SERIES}  kind="series" onOpen={setDetail} tweaks={tweaks}/>}
-        {route === 'search'   && <Search    onOpen={setDetail} tweaks={tweaks} live={live}/>}
-        {route === 'settings' && <Settings  onReset={() => { setStage('onboarding'); localStorage.removeItem('strm-stage'); }} live={live}/>}
+        {route === 'home'     && <Home      onOpen={setDetail} tweaks={tweaks} live={live}
+                                             onPlay={handlePlay} myList={myList} onToggleMyList={toggleMyList}/>}
+        {route === 'live'     && <LiveTV    onOpen={setDetail} tweaks={tweaks} live={live} onPlay={handlePlay}/>}
+        {route === 'movies'   && <Library   title="Movies"
+                                             subtitle={live.status==='ok' ? `${live.catalog.vod.movies.length.toLocaleString()} EU\u00a0|\u00a0UK titles` : 'Awaiting connection \u00b7 showing preview'}
+                                             items={live.status==='ok' ? live.catalog.vod.movies.map(m=>({id:m.stream_id,title:m.name,genre:m.category_name||'Movie',rating:m.rating,year:m.releasedate||'',runtime:'',cover:m.stream_icon,container_extension:m.container_extension,stream_type:'movie'})) : MOVIES}
+                                             kind="movies" onOpen={setDetail} tweaks={tweaks} onPlay={handlePlay}/>}
+        {route === 'series'   && <Library   title="Series"
+                                             subtitle={live.status==='ok' ? `${live.catalog.series.shows.length.toLocaleString()} EU\u00a0|\u00a0UK shows` : 'Awaiting connection \u00b7 showing preview'}
+                                             items={live.status==='ok' ? live.catalog.series.shows.map(s=>({id:s.series_id,title:s.name,genre:s.genre||'Series',seasons:s.num||1,lastEp:s.last_modified||'',cover:s.cover,stream_type:'series'})) : SERIES}
+                                             kind="series" onOpen={setDetail} tweaks={tweaks} onPlay={handlePlay}/>}
+        {route === 'search'   && <Search    onOpen={setDetail} tweaks={tweaks} live={live} onPlay={handlePlay}/>}
+        {route === 'settings' && <Settings  onReset={() => {
+            setStage('onboarding');
+            localStorage.removeItem('strm-stage');
+            localStorage.removeItem('strm-creds');
+            Object.assign(window.STRM_CREDS, { dns: '', username: '', password: '' });
+          }} live={live}/>}
       </main>
-      {detail && <Detail item={detail} onClose={() => setDetail(null)}/>}
-      <RemoteLegend show={tweaks.remoteLegend && !detail}/>
+      {detail && <Detail item={detail} onClose={() => setDetail(null)}
+                          onPlay={handlePlay} myList={myList} onToggleMyList={toggleMyList}/>}
+      {playing && <PlayerModal item={playing} onClose={() => setPlaying(null)}/>}
+      <RemoteLegend show={tweaks.remoteLegend && !detail && !playing}/>
       {tweaksOpen && <TweaksPanel tweaks={tweaks} patch={patchTweaks} onClose={() => setTweaksOpen(false)}/>}
     </div>
   );
@@ -1953,7 +2178,7 @@ function TweaksPanel({ tweaks, patch, onClose }) {
   );
 }
 
-Object.assign(window, { App, DEFAULT_TWEAKS });
+Object.assign(window, { App, DEFAULT_TWEAKS, PlayerModal });
 </script>
 
 <script type="text/babel">
