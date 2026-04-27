@@ -1,0 +1,33 @@
+{
+  "identifier" : "BodyReaderProducts",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familySharable" : false,
+      "groupNumber" : 1,
+      "internalID" : "7C1A2345-6789-ABCD-EF01-234567890ABC",
+      "introductoryOffer" : null,
+      "localizations" : [
+        {
+          "description" : "Unlock a detailed AI-powered reading of your chosen body part.",
+          "displayName" : "Single Reading",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.bodyreader.app.reading",
+      "referenceName" : "Single Reading",
+      "subscriptionGroupID" : null,
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationUsername" : "",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
